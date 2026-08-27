@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from embodied_agent.evals import default_multi_robot_cases, run_scripted_baseline
+from embodied_agent.evals.multi_robot import default_multi_robot_cases, run_scripted_baseline
 
 
 class MultiRobotEvalTests(unittest.TestCase):
