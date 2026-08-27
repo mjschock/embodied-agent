@@ -31,11 +31,14 @@
 - [ ] Add bounded retries and failure recovery
 
 ## M3 — Evals
-- [ ] Single-robot skill success rate
-- [ ] Robot-selection accuracy
-- [ ] Multi-step task completion rate
-- [ ] Recovery-from-failure rate
-- [ ] Sim reproducibility / deterministic seeds
+- [x] Add dependency-free three-robot baseline eval suite
+- [x] Measure robot-selection accuracy and plan exact-match
+- [x] Measure multi-step task completion, tool success, and execution coverage
+- [x] Verify execution failures are distinguishable from planning failures
+- [ ] Run the same suite against physics-backed simulator adapters
+- [ ] Add single-robot skill success rate and latency metrics
+- [ ] Add recovery-from-failure tasks
+- [ ] Add sim reproducibility / deterministic seed metrics
 
 ## M4 — First physical embodiment
 - [ ] Add XLeRobot real adapter
