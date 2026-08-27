@@ -8,7 +8,8 @@
 - [x] Smoke tests
 
 ## M1 — Real simulators
-- [ ] Replace Crazyflie stub with `gym-pybullet-drones`
+- [x] Add a real Crazyflie `VelocityAviary` adapter with semantic `takeoff/goto/land` skills
+- [ ] Make the real Crazyflie adapter the default sim backend after integration testing
 - [ ] Replace Humanoid stub with official LeRobot Humanoid MuJoCo runtime
 - [ ] Replace XLeRobot stub with current maintained simulation path
 - [ ] Normalize observations

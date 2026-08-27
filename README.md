@@ -60,7 +60,7 @@ This initial repository contains:
 - smoke tests;
 - config placeholders for future sim and real backends.
 
-The next milestone is replacing one stub at a time with a real simulator adapter.
+The first real simulator adapter is now implemented for Crazyflie using `gym-pybullet-drones` `VelocityAviary`. XLeRobot and humanoid still use deterministic stubs in the dependency-free demo.
 
 ## Quick start
 
@@ -69,6 +69,12 @@ Requires Python 3.11+.
 ```bash
 python -m embodied_agent.demo
 python -m unittest discover -s tests -v
+```
+
+For the real Crazyflie PyBullet adapter (current upstream requires Python 3.12+):
+
+```bash
+pip install -e ".[crazyflie-sim]"
 ```
 
 ## Planned simulator adapters
