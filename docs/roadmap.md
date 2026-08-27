@@ -23,12 +23,13 @@
 
 ## M2 — Agent tools
 - [x] Add allowlisted, schema-validated semantic agent tool router
-- [ ] Expose the safe semantic tool router through MCP
+- [x] Expose the safe semantic tool router through MCP v2 stdio
 - [x] Add deterministic planner/executor loop
 - [x] Add robot selection based on capabilities and available skills
 - [x] Make tool exposure config-driven
 - [ ] Add task state and world entities
 - [ ] Add bounded retries and failure recovery
+- [ ] Add an LLM planner that consumes the MCP tool surface
 
 ## M3 — Evals
 - [x] Add dependency-free three-robot baseline eval suite
@@ -39,6 +40,7 @@
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
+- [ ] Compare LLM planner metrics against deterministic baseline
 
 ## M4 — First physical embodiment
 - [ ] Add XLeRobot real adapter
