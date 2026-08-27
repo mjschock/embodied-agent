@@ -62,7 +62,8 @@ The repository now contains:
 - optional policy-backed humanoid `walk_velocity` control;
 - a config-driven robot stack;
 - an allowlisted, schema-validated high-level agent tool router;
-- a deterministic capability planner and sequential executor for baseline evals;
+- a deterministic capability planner and sequential executor;
+- a dependency-free three-robot coordination benchmark with planning and execution metrics;
 - deterministic simulation stubs and contract tests.
 
 XLeRobot arm actuation is intentionally not agent-accessible yet. `MANIPULATE` will only be enabled after a LeRobot/VLA policy owns that lower-level control path.
@@ -73,10 +74,11 @@ Requires Python 3.11+.
 
 ```bash
 python -m embodied_agent.demo
+python -m embodied_agent.evals.multi_robot
 python -m unittest discover -s tests -v
 ```
 
-The dependency-free demo still uses deterministic stubs. Real simulator adapters are optional:
+The dependency-free demo and baseline eval do not require physics packages. Real simulator adapters are optional:
 
 ```bash
 pip install -e ".[crazyflie-sim]"
@@ -102,6 +104,16 @@ for tool in tools.list_tools():
 
 The current `CapabilityPlanner` is intentionally deterministic. It binds task steps to available robot tools and gives us a stable baseline before an LLM or MCP planner is introduced.
 
+## Evals
+
+The first benchmark coordinates all three embodiments across three waypoint variants. It separately reports robot-selection accuracy, exact plan match, task completion, tool-call success, and execution coverage.
+
+```bash
+python -m embodied_agent.evals.multi_robot
+```
+
+The benchmark currently runs against scripted embodiments so orchestration regressions are isolated from physics. It also includes a failure-injection test proving that correct planning can be distinguished from downstream execution failure. See `docs/evals.md`.
+
 ## Simulator backends
 
 ### XLeRobot
@@ -119,11 +131,9 @@ The current `CapabilityPlanner` is intentionally deterministic. It binds task st
 embodied-agent/
 ├── embodied_agent/
 │   ├── agent/
-│   │   ├── config.py
-│   │   ├── planning.py
-│   │   └── tools.py
 │   ├── core/
 │   ├── embodiments/
+│   ├── evals/
 │   └── demo.py
 ├── configs/
 ├── docs/
@@ -133,7 +143,7 @@ embodied-agent/
 
 ## Next milestones
 
-1. Multi-robot coordination evals for robot selection and task completion.
-2. Shared world/task state.
-3. MCP exposure of the same safe tool router.
-4. An LLM planner evaluated against the deterministic capability-planner baseline.
+1. Run the same coordination suite against physics-backed simulators.
+2. Add shared world/task state.
+3. Expose the same safe tool router through MCP.
+4. Evaluate an LLM planner against the deterministic capability-planner baseline.
