@@ -24,7 +24,10 @@ humanoid.walk_velocity   # only when a locomotion policy is configured
 Each tool is schema-validated before it can reach an embodiment, and capabilities are checked at runtime. Configuration can remove tools, but it cannot grant a capability the underlying robot does not advertise.
 
 ```text
-High-level agent / planner
+High-level agent / MCP host
+          |
+          v
+      MCP transport
           |
           v
 Schema-validated tool router
@@ -62,6 +65,7 @@ The repository now contains:
 - optional policy-backed humanoid `walk_velocity` control;
 - a config-driven robot stack;
 - an allowlisted, schema-validated high-level agent tool router;
+- an MCP v2 server exposing that same safe router over stdio;
 - a deterministic capability planner and sequential executor;
 - a dependency-free three-robot coordination benchmark with planning and execution metrics;
 - deterministic simulation stubs and contract tests.
@@ -86,6 +90,15 @@ pip install -e ".[xlerobot-sim]"
 pip install -e ".[humanoid-sim]"
 ```
 
+For MCP:
+
+```bash
+pip install -e ".[mcp]"
+embodied-agent-mcp --config configs/all_sim.json
+```
+
+The MCP integration targets the official Python SDK v2 line and publishes the router's JSON Schemas directly through the SDK's low-level server API. See `docs/mcp.md`.
+
 XLeRobot and humanoid MuJoCo adapters also require their upstream runtime/model checkouts; see `docs/xlerobot_setup.md` and `docs/humanoid_setup.md`.
 
 ## Agent layer
@@ -102,7 +115,15 @@ for tool in tools.list_tools():
     print(tool["name"], tool["input_schema"])
 ```
 
-The current `CapabilityPlanner` is intentionally deterministic. It binds task steps to available robot tools and gives us a stable baseline before an LLM or MCP planner is introduced.
+The same router can be exposed over MCP without changing any embodiment code:
+
+```python
+from embodied_agent.mcp import build_mcp_server
+
+server = build_mcp_server(tools, registry=robots)
+```
+
+The current `CapabilityPlanner` is intentionally deterministic. It binds task steps to available robot tools and gives us a stable baseline before an LLM planner is introduced.
 
 ## Evals
 
@@ -134,6 +155,7 @@ embodied-agent/
 │   ├── core/
 │   ├── embodiments/
 │   ├── evals/
+│   ├── mcp/
 │   └── demo.py
 ├── configs/
 ├── docs/
@@ -143,7 +165,7 @@ embodied-agent/
 
 ## Next milestones
 
-1. Run the same coordination suite against physics-backed simulators.
-2. Add shared world/task state.
-3. Expose the same safe tool router through MCP.
-4. Evaluate an LLM planner against the deterministic capability-planner baseline.
+1. Add shared world/task state so multiple embodiments reason over the same entities and coordinates.
+2. Run the coordination suite against physics-backed simulators.
+3. Add bounded retry/failure-recovery policies.
+4. Evaluate an LLM planner over MCP against the deterministic capability-planner baseline.
