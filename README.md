@@ -86,7 +86,7 @@ Target the current XLeRobot / LeRobot-compatible simulation path, likely via Man
 Start with `gym-pybullet-drones` / Crazyflie-compatible Gymnasium simulation. Later add a physical adapter backed by Bitcraze `cflib`.
 
 ### LeRobot Humanoid
-Use the official LeRobot Humanoid MuJoCo runtime first. Later swap to the physical runtime while preserving the same semantic interface.
+`HumanoidMuJoCo` now wraps the official LeRobot Humanoid `SimBipedalRobotController` for reset, stand, and normalized observation state. Walking is intentionally not advertised until the official locomotion `RLAgent` is connected. See `docs/humanoid_setup.md`.
 
 ## Repository layout
 
