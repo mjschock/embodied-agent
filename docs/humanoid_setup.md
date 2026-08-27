@@ -43,6 +43,26 @@ state, IMU state, reset, and joint commands. It does **not** by itself implement
 semantic walking or navigation.
 
 The official runtime's locomotion path is an `RLAgent` running a trained ONNX/Torch
-policy. `embodied-agent` therefore does not claim the `WALK` capability yet. The next
-increment will connect a locomotion policy runner and expose a bounded semantic
-walking skill above it.
+policy. Configure a policy directory to enable `Capability.WALK` and the bounded
+`walk_velocity` skill:
+
+```python
+robot = HumanoidMuJoCo(
+    runtime_root="/path/to/lerobot-humanoid-runtime",
+    policy_dir="control/policy/<policy-directory>",
+)
+
+await robot.connect()
+await robot.execute(
+    "walk_velocity",
+    lin_x_mps=0.2,
+    lin_y_mps=0.0,
+    yaw_rate_rps=0.0,
+    duration_s=1.0,
+)
+```
+
+Each velocity command is self-stopping after at most 5 seconds. Default command
+limits mirror the official runtime's gamepad example: 0.75 m/s forward/back,
+0.50 m/s lateral, and 0.80 rad/s yaw. `walk_to` remains intentionally absent until
+we add closed-loop position/navigation feedback.
