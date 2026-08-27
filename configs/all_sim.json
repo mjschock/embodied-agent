@@ -1,14 +1,19 @@
 {
-  "xlerobot": {
-    "backend": "sim",
-    "adapter": "xlerobot_mujoco"
-  },
-  "crazyflie": {
-    "backend": "sim",
-    "adapter": "gym_pybullet_drones"
-  },
-  "humanoid": {
-    "backend": "sim",
-    "adapter": "lerobot_humanoid_mujoco"
+  "robots": {
+    "xlerobot": {
+      "backend": "sim",
+      "adapter": "xlerobot_mujoco",
+      "tools": ["observe", "reset", "drive_velocity", "navigate_to"]
+    },
+    "crazyflie": {
+      "backend": "sim",
+      "adapter": "gym_pybullet_drones",
+      "tools": ["observe", "takeoff", "goto", "land"]
+    },
+    "humanoid": {
+      "backend": "sim",
+      "adapter": "lerobot_humanoid_mujoco",
+      "tools": ["observe", "reset", "stand", "walk_velocity"]
+    }
   }
 }

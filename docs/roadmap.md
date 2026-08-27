@@ -22,9 +22,11 @@
 - [ ] Record episode traces
 
 ## M2 — Agent tools
-- [ ] Expose safe semantic skills as MCP tools
-- [ ] Add planner/executor loop
-- [ ] Add robot selection based on capabilities
+- [x] Add allowlisted, schema-validated semantic agent tool router
+- [ ] Expose the safe semantic tool router through MCP
+- [x] Add deterministic planner/executor loop
+- [x] Add robot selection based on capabilities and available skills
+- [x] Make tool exposure config-driven
 - [ ] Add task state and world entities
 - [ ] Add bounded retries and failure recovery
 
