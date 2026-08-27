@@ -1,0 +1,14 @@
+{
+  "xlerobot": {
+    "backend": "real",
+    "adapter": "lerobot"
+  },
+  "crazyflie": {
+    "backend": "real",
+    "adapter": "cflib"
+  },
+  "humanoid": {
+    "backend": "sim",
+    "adapter": "lerobot_humanoid_mujoco"
+  }
+}

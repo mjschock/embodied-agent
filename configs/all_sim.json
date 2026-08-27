@@ -1,0 +1,14 @@
+{
+  "xlerobot": {
+    "backend": "sim",
+    "adapter": "maniskill"
+  },
+  "crazyflie": {
+    "backend": "sim",
+    "adapter": "gym_pybullet_drones"
+  },
+  "humanoid": {
+    "backend": "sim",
+    "adapter": "lerobot_humanoid_mujoco"
+  }
+}
