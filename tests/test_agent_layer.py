@@ -170,7 +170,7 @@ class AgentToolTests(unittest.TestCase):
             result = await PlanExecutor(router).execute(plan)
             self.assertFalse(result.ok)
             self.assertEqual([call.tool for call in result.calls], ["crazyflie.takeoff", "crazyflie.goto"])
-            self.assertEqual([call.skill for call in drone.calls], ["takeoff", "goto"])
+            self.assertEqual([call.name for call in drone.calls], ["takeoff", "goto"])
 
         asyncio.run(scenario())
 
