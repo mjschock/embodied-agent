@@ -12,7 +12,8 @@
 - [ ] Make the real Crazyflie adapter the default sim backend after integration testing
 - [x] Add official LeRobot Humanoid MuJoCo controller adapter
 - [ ] Smoke-test Humanoid adapter against a local official runtime checkout
-- [ ] Add policy-backed humanoid walking skill
+- [x] Add bounded policy-backed humanoid `walk_velocity` skill
+- [ ] Add closed-loop humanoid navigation / `walk_to`
 - [ ] Replace XLeRobot stub with current maintained simulation path
 - [ ] Normalize observations
 - [ ] Add simulator reset/seed support
