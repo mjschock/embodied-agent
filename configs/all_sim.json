@@ -1,7 +1,7 @@
 {
   "xlerobot": {
     "backend": "sim",
-    "adapter": "maniskill"
+    "adapter": "xlerobot_mujoco"
   },
   "crazyflie": {
     "backend": "sim",

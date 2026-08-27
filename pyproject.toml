@@ -13,6 +13,7 @@ dependencies = []
 [project.optional-dependencies]
 crazyflie-sim = ["gym-pybullet-drones>=2.2,<3"]
 humanoid-sim = ["mujoco>=3,<4", "numpy>=2.0"]
+xlerobot-sim = ["mujoco>=3,<4", "numpy>=2.0"]
 dev = ["numpy>=2.0"]
 
 [tool.setuptools.packages.find]

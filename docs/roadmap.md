@@ -14,7 +14,9 @@
 - [ ] Smoke-test Humanoid adapter against a local official runtime checkout
 - [x] Add bounded policy-backed humanoid `walk_velocity` skill
 - [ ] Add closed-loop humanoid navigation / `walk_to`
-- [ ] Replace XLeRobot stub with current maintained simulation path
+- [x] Add upstream XLeRobot MuJoCo base-navigation adapter
+- [ ] Smoke-test XLeRobot adapter against a local upstream checkout
+- [ ] Attach XLeRobot arm/VLA policy before enabling `MANIPULATE`
 - [ ] Normalize observations
 - [ ] Add simulator reset/seed support
 - [ ] Record episode traces
