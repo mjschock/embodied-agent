@@ -27,7 +27,10 @@
 - [x] Add deterministic planner/executor loop
 - [x] Add robot selection based on capabilities and available skills
 - [x] Make tool exposure config-driven
-- [ ] Add task state and world entities
+- [x] Add shared world entities and task execution state
+- [x] Add late-bound world entity references for cross-embodiment targets
+- [ ] Expose read-only world state to the high-level planner / MCP host
+- [ ] Add perception-to-world entity updates
 - [ ] Add bounded retries and failure recovery
 - [ ] Add an LLM planner that consumes the MCP tool surface
 
@@ -36,6 +39,8 @@
 - [x] Measure robot-selection accuracy and plan exact-match
 - [x] Measure multi-step task completion, tool success, and execution coverage
 - [x] Verify execution failures are distinguishable from planning failures
+- [x] Use shared world entities instead of duplicated waypoint coordinates in baseline evals
+- [ ] Add perception-update / stale-plan world-state evals
 - [ ] Run the same suite against physics-backed simulator adapters
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
@@ -51,7 +56,8 @@
 ## M5 — Mixed reality
 - [ ] Add physical Crazyflie via Bitcraze `cflib`
 - [ ] Run physical XLeRobot + physical Crazyflie + simulated humanoid
-- [ ] Share world state across embodiments
+- [x] Establish shared world-state abstraction across embodiments
+- [ ] Feed real-robot localization/perception into shared world state
 
 ## M6 — Humanoid
 - [ ] Track LeRobot Humanoid upper-body / whole-body progress

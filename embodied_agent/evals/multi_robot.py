@@ -14,6 +14,7 @@ from embodied_agent.core import (
     SkillRequest,
     SkillResult,
 )
+from embodied_agent.world import Pose3D, WorldEntity, WorldState, entity_pose_refs
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,7 @@ class EvalCase:
     instruction: str
     task: Task
     expected_tools: tuple[str, ...]
+    entities: tuple[WorldEntity, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,13 @@ def default_multi_robot_cases() -> tuple[EvalCase, ...]:
         "crazyflie.land",
     )
     for label, x_m, y_m in waypoints:
+        target = WorldEntity(
+            entity_id=label,
+            kind="inspection_waypoint",
+            pose=Pose3D(x_m=x_m, y_m=y_m, z_m=1.0),
+            source="eval-fixture",
+            confidence=1.0,
+        )
         task = Task(
             name=f"scout-approach-{label}",
             steps=(
@@ -91,13 +100,13 @@ def default_multi_robot_cases() -> tuple[EvalCase, ...]:
                 TaskStep(
                     "goto",
                     Capability.FLY,
-                    {"x_m": x_m, "y_m": y_m, "z_m": 1.0},
+                    entity_pose_refs(label, "x_m", "y_m", "z_m"),
                     label="scout waypoint",
                 ),
                 TaskStep(
                     "navigate_to",
                     Capability.NAVIGATE,
-                    {"x_m": x_m, "y_m": y_m},
+                    entity_pose_refs(label, "x_m", "y_m"),
                     label="move ground robot",
                 ),
                 TaskStep("stand", Capability.STAND, {}, label="ready humanoid"),
@@ -114,6 +123,7 @@ def default_multi_robot_cases() -> tuple[EvalCase, ...]:
                 ),
                 task=task,
                 expected_tools=expected,
+                entities=(target,),
             )
         )
     return tuple(cases)
@@ -131,6 +141,10 @@ async def evaluate_cases(
     total_successful_calls = 0
 
     for case in cases:
+        if executor.world is not None:
+            for entity in case.entities:
+                executor.world.upsert_entity(entity)
+
         total_expected_steps += len(case.expected_tools)
         try:
             plan = planner.plan(case.task)
@@ -282,7 +296,7 @@ async def run_scripted_baseline(
         await robot.connect()
     try:
         planner = CapabilityPlanner(router)
-        executor = PlanExecutor(router)
+        executor = PlanExecutor(router, world=WorldState())
         return await evaluate_cases(planner, executor, default_multi_robot_cases())
     finally:
         for robot in registry:
