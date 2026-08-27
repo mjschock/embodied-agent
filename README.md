@@ -32,6 +32,8 @@ High-level agent / MCP host
           v
 Schema-validated tool router
           |
+          +----------> shared WorldState
+          |               entities / poses / task state
           v
 Semantic skill API
           |
@@ -66,6 +68,8 @@ The repository now contains:
 - a config-driven robot stack;
 - an allowlisted, schema-validated high-level agent tool router;
 - an MCP v2 server exposing that same safe router over stdio;
+- a shared `WorldState` for named entities, world-frame poses, task progress, and latest robot results;
+- late-bound entity references resolved immediately before each robot tool call;
 - a deterministic capability planner and sequential executor;
 - a dependency-free three-robot coordination benchmark with planning and execution metrics;
 - deterministic simulation stubs and contract tests.
@@ -125,6 +129,24 @@ server = build_mcp_server(tools, registry=robots)
 
 The current `CapabilityPlanner` is intentionally deterministic. It binds task steps to available robot tools and gives us a stable baseline before an LLM planner is introduced.
 
+## Shared world state
+
+Plans can reference named world entities instead of copying coordinates into every step:
+
+```python
+from embodied_agent.world import Pose3D, WorldEntity, WorldState, entity_pose_refs
+
+world = WorldState()
+world.upsert_entity(
+    WorldEntity("inspection_target", "waypoint", Pose3D(1.5, 0.5, 1.0))
+)
+
+drone_args = entity_pose_refs("inspection_target", "x_m", "y_m", "z_m")
+ground_args = entity_pose_refs("inspection_target", "x_m", "y_m")
+```
+
+`PlanExecutor(..., world=world)` resolves those references immediately before each tool call. If perception updates `inspection_target` after the plan was created, later robot steps use the corrected pose rather than stale coordinates. Task progress and the latest robot results are recorded back into the same world state. See `docs/world_state.md`.
+
 ## Evals
 
 The first benchmark coordinates all three embodiments across three waypoint variants. It separately reports robot-selection accuracy, exact plan match, task completion, tool-call success, and execution coverage.
@@ -133,7 +155,7 @@ The first benchmark coordinates all three embodiments across three waypoint vari
 python -m embodied_agent.evals.multi_robot
 ```
 
-The benchmark currently runs against scripted embodiments so orchestration regressions are isolated from physics. It also includes a failure-injection test proving that correct planning can be distinguished from downstream execution failure. See `docs/evals.md`.
+The benchmark currently runs against scripted embodiments so orchestration regressions are isolated from physics. Its waypoints are shared world entities consumed by both Crazyflie and XLeRobot. It also includes a failure-injection test proving that correct planning can be distinguished from downstream execution failure. See `docs/evals.md`.
 
 ## Simulator backends
 
@@ -156,6 +178,7 @@ embodied-agent/
 │   ├── embodiments/
 │   ├── evals/
 │   ├── mcp/
+│   ├── world/
 │   └── demo.py
 ├── configs/
 ├── docs/
@@ -165,7 +188,7 @@ embodied-agent/
 
 ## Next milestones
 
-1. Add shared world/task state so multiple embodiments reason over the same entities and coordinates.
+1. Expose read-only world state to the high-level planner and add a perception-to-world update path.
 2. Run the coordination suite against physics-backed simulators.
 3. Add bounded retry/failure-recovery policies.
 4. Evaluate an LLM planner over MCP against the deterministic capability-planner baseline.
