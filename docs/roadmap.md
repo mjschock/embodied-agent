@@ -76,7 +76,8 @@
 - [x] Apply skill reliability metrics to pinned Crazyflie flight backend
 - [ ] Measure Humanoid learned-walking reliability when a pinned policy is provisioned in CI
 - [ ] Add recovery-from-failure tasks
-- [ ] Add sim reproducibility / deterministic seed metrics
+- [x] Add reusable sim reproducibility metric with pinned Crazyflie/XLeRobot probes
+- [ ] Extend sim reproducibility probes to Microduck and LeRobot Humanoid
 - [ ] Compare physics-backed LLM task success against deterministic orchestration
 
 ## M4 — First physical embodiment
