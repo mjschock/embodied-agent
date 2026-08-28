@@ -69,7 +69,8 @@
 - [ ] Record/version first live four-embodiment AgentModel result
 - [x] Add combined four-embodiment real-simulator gate
 - [ ] Add live four-embodiment physics comparison command/result record
-- [ ] Add single-robot skill success rate and latency metrics
+- [x] Add single-robot skill success rate and latency metrics
+- [ ] Apply skill reliability metrics to pinned physics backends
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
 - [ ] Compare physics-backed LLM task success against deterministic orchestration
