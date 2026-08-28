@@ -9,9 +9,8 @@ from embodied_agent.embodiments import MicroduckMuJoCo
 
 
 class FakeMicroduckRuntime:
-    def __init__(self, *, recover_ok: bool = True) -> None:
+    def __init__(self) -> None:
         self.started = False
-        self.recover_ok = recover_ok
         self.calls: list[tuple[str, dict]] = []
         self.state = {
             "position_m": (0.0, 0.0, 0.12),
@@ -51,12 +50,17 @@ class FakeMicroduckRuntime:
         self.calls.append(("kick", dict(params)))
         return {**self.state, "foot": params["foot"]}
 
-    def recover(self) -> dict:
-        self.calls.append(("recover", {}))
-        return {**self.state, "recovered": self.recover_ok, "recovery_steps": 50}
+    def roll(self) -> dict:
+        self.calls.append(("roll", {}))
+        return {**self.state, "upright": True}
 
 
-def build_robot(fake: FakeMicroduckRuntime, *, both_kicks: bool = True) -> MicroduckMuJoCo:
+def build_robot(
+    fake: FakeMicroduckRuntime,
+    *,
+    both_kicks: bool = True,
+    with_roll: bool = True,
+) -> MicroduckMuJoCo:
     return MicroduckMuJoCo(
         name="microduck",
         runtime_root="/unused/microduck_rl",
@@ -64,6 +68,7 @@ def build_robot(fake: FakeMicroduckRuntime, *, both_kicks: bool = True) -> Micro
         standing_policy_path="/unused/stand.onnx",
         kick_left_policy_path="/unused/kick-left.onnx",
         kick_right_policy_path="/unused/kick-right.onnx" if both_kicks else None,
+        roll_policy_path="/unused/roulade.onnx" if with_roll else None,
         runtime_factory=lambda: fake,
     )
 
@@ -72,11 +77,11 @@ class MicroduckAdapterTests(unittest.TestCase):
     def test_capabilities_reflect_configured_policies(self) -> None:
         full = build_robot(FakeMicroduckRuntime())
         self.assertTrue(full.supports(Capability.OBSERVE, Capability.STAND, Capability.WALK))
-        self.assertTrue(full.supports(Capability.KICK, Capability.RECOVER))
+        self.assertTrue(full.supports(Capability.KICK, Capability.ROLL))
 
-        no_right_kick = build_robot(FakeMicroduckRuntime(), both_kicks=False)
-        self.assertFalse(no_right_kick.supports(Capability.KICK))
-        self.assertTrue(no_right_kick.supports(Capability.RECOVER))
+        partial = build_robot(FakeMicroduckRuntime(), both_kicks=False, with_roll=False)
+        self.assertFalse(partial.supports(Capability.KICK))
+        self.assertFalse(partial.supports(Capability.ROLL))
 
     def test_lifecycle_and_semantic_skills(self) -> None:
         fake = FakeMicroduckRuntime()
@@ -118,9 +123,9 @@ class MicroduckAdapterTests(unittest.TestCase):
             self.assertTrue(kick.ok)
             self.assertEqual(kick.data["foot"], "left")
 
-            recovery = await robot.execute("recover")
-            self.assertTrue(recovery.ok)
-            self.assertTrue(recovery.data["recovered"])
+            roll = await robot.execute("roll")
+            self.assertTrue(roll.ok)
+            self.assertTrue(roll.data["upright"])
 
             reset = await robot.execute("reset")
             self.assertTrue(reset.ok)
@@ -130,31 +135,19 @@ class MicroduckAdapterTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_recovery_timeout_is_reported_as_skill_failure(self) -> None:
-        robot = build_robot(FakeMicroduckRuntime(recover_ok=False))
-
-        async def scenario() -> None:
-            await robot.connect()
-            result = await robot.execute("recover")
-            self.assertFalse(result.ok)
-            self.assertIn("timed out", result.detail)
-            await robot.disconnect()
-
-        asyncio.run(scenario())
-
-    def test_router_exposes_enum_validated_kick_and_recovery(self) -> None:
+    def test_router_exposes_enum_validated_kick_and_roll(self) -> None:
         fake = FakeMicroduckRuntime()
         robot = build_robot(fake)
         registry = RobotRegistry()
         registry.register(robot)
         router = RobotToolRouter(
             registry,
-            {"microduck": ["observe", "stand", "walk_velocity", "kick", "recover"]},
+            {"microduck": ["observe", "stand", "walk_velocity", "kick", "roll"]},
         )
 
         tools = {item["name"]: item for item in router.list_tools()}
         self.assertIn("microduck.kick", tools)
-        self.assertIn("microduck.recover", tools)
+        self.assertIn("microduck.roll", tools)
         self.assertEqual(
             tools["microduck.kick"]["input_schema"]["properties"]["foot"]["enum"],
             ["left", "right"],
@@ -167,20 +160,21 @@ class MicroduckAdapterTests(unittest.TestCase):
             self.assertEqual(fake.calls[-1], ("kick", {"foot": "right"}))
             with self.assertRaises(ToolValidationError):
                 await router.call("microduck.kick", {"foot": "middle"})
-            recover = await router.call("microduck.recover", {})
-            self.assertTrue(recover.ok)
+            roll = await router.call("microduck.roll", {})
+            self.assertTrue(roll.ok)
+            self.assertEqual(fake.calls[-1], ("roll", {}))
             await robot.disconnect()
 
         asyncio.run(scenario())
 
-    def test_router_hides_kick_when_policy_pair_is_incomplete(self) -> None:
-        robot = build_robot(FakeMicroduckRuntime(), both_kicks=False)
+    def test_router_hides_skills_when_policy_assets_are_incomplete(self) -> None:
+        robot = build_robot(FakeMicroduckRuntime(), both_kicks=False, with_roll=False)
         registry = RobotRegistry()
         registry.register(robot)
-        router = RobotToolRouter(registry, {"microduck": ["kick", "recover"]})
+        router = RobotToolRouter(registry, {"microduck": ["kick", "roll"]})
         names = [item["name"] for item in router.list_tools()]
         self.assertNotIn("microduck.kick", names)
-        self.assertIn("microduck.recover", names)
+        self.assertNotIn("microduck.roll", names)
 
 
 if __name__ == "__main__":
