@@ -72,6 +72,7 @@ class CrazyfliePyBullet(Embodiment):
             initial_position=self.initial_position,
         )
         self._obs, _ = self._env.reset(seed=self.seed)
+        self._reset_integrated_controllers(self._env)
 
     async def disconnect(self) -> None:
         if self._env is not None:
@@ -101,7 +102,13 @@ class CrazyfliePyBullet(Embodiment):
                 self.seed if supplied_seed is None else self._coerce_seed(supplied_seed)
             )
             self.seed = effective_seed
-            self._obs, _ = self._require_env().reset(seed=effective_seed)
+            env = self._require_env()
+            self._obs, _ = env.reset(seed=effective_seed)
+            # VelocityAviary owns persistent DSLPIDControl instances whose integral
+            # and previous-error state is not cleared by BaseAviary.reset(). Reset
+            # those controllers too so this semantic operation is a full episode
+            # boundary rather than only a PyBullet world reset.
+            self._reset_integrated_controllers(env)
             state = self._state_vector()
             return SkillResult(
                 embodiment=self.name,
@@ -239,6 +246,13 @@ class CrazyfliePyBullet(Embodiment):
         if self._env is None:
             raise RuntimeError(f"{self.name} is not connected")
         return self._env
+
+    @staticmethod
+    def _reset_integrated_controllers(env: Any) -> None:
+        for controller in getattr(env, "ctrl", ()):
+            reset = getattr(controller, "reset", None)
+            if callable(reset):
+                reset()
 
     @staticmethod
     def _coerce_seed(value: Any) -> int:

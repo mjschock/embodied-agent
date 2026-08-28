@@ -5,6 +5,7 @@ import json
 import unittest
 
 from embodied_agent.embodiments import CrazyfliePyBullet
+from embodied_agent.evals.reproducibility import benchmark_reproducibility
 from embodied_agent.evals.skill_metrics import SkillProbe, benchmark_robot_skills
 
 
@@ -83,9 +84,6 @@ class CrazyfliePhysicsIntegrationTests(unittest.TestCase):
             await robot.connect()
 
             async def prepare_attempt(robot, probe, attempt) -> None:
-                # Reset and re-seed the same VelocityAviary instance before every
-                # sample. This is outside the benchmark clock so each measured skill
-                # begins from an identical simulator state without counting reset time.
                 reset = await robot.execute("reset", seed=0)
                 if not reset.ok:
                     raise RuntimeError(f"Crazyflie reset failed: {reset.detail}")
@@ -93,8 +91,6 @@ class CrazyfliePhysicsIntegrationTests(unittest.TestCase):
                 self.assertAlmostEqual(reset.data["position_m"][1], 0.0, delta=1e-6)
                 self.assertAlmostEqual(reset.data["position_m"][2], 0.1, delta=1e-6)
 
-                # Horizontal translation and landing both require a stable airborne
-                # precondition. Establish it before timing the skill under test.
                 if probe.skill in {"goto", "land"}:
                     takeoff = await robot.execute(
                         "takeoff",
@@ -152,6 +148,69 @@ class CrazyfliePhysicsIntegrationTests(unittest.TestCase):
                 self.assertGreaterEqual(metric.max_latency_ms, metric.p95_latency_ms)
                 self.assertIsNotNone(metric.successful_mean_latency_ms)
                 self.assertTrue(all(not sample.error for sample in metric.samples))
+
+        asyncio.run(scenario())
+
+    def test_seeded_takeoff_and_translation_are_reproducible(self) -> None:
+        async def scenario() -> None:
+            robot = CrazyfliePyBullet(
+                gui=False,
+                seed=123,
+                ctrl_freq_hz=60,
+                initial_position=(0.0, 0.0, 0.1),
+                position_tolerance_m=0.06,
+                slow_radius_m=0.25,
+            )
+            await robot.connect()
+
+            async def run_episode(attempt: int):
+                reset = await robot.execute("reset", seed=123)
+                if not reset.ok:
+                    raise RuntimeError(reset.detail)
+                takeoff = await robot.execute(
+                    "takeoff",
+                    altitude_m=0.4,
+                    timeout_s=6.0,
+                )
+                move = await robot.execute(
+                    "goto",
+                    position=(0.15, 0.10, 0.4),
+                    timeout_s=6.0,
+                )
+                if not takeoff.ok or not move.ok:
+                    raise RuntimeError(
+                        f"episode {attempt} failed: takeoff={takeoff.detail}; goto={move.detail}"
+                    )
+                return {
+                    "takeoff": {
+                        "ok": takeoff.ok,
+                        "steps": int(takeoff.data["steps"]),
+                        "final_position_m": takeoff.data["final_position_m"],
+                        "position_error_m": float(takeoff.data["position_error_m"]),
+                    },
+                    "goto": {
+                        "ok": move.ok,
+                        "steps": int(move.data["steps"]),
+                        "final_position_m": move.data["final_position_m"],
+                        "position_error_m": float(move.data["position_error_m"]),
+                    },
+                }
+
+            try:
+                result = await benchmark_reproducibility(
+                    run_episode,
+                    attempts=3,
+                    atol=1e-7,
+                    label="crazyflie-seeded-takeoff-goto",
+                )
+            finally:
+                await robot.disconnect()
+
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+            self.assertEqual(result.comparison_count, 2)
+            self.assertEqual(result.matching_comparisons, 2)
+            self.assertEqual(result.reproducibility_rate, 1.0)
+            self.assertTrue(all(sample.matches_baseline for sample in result.samples))
 
         asyncio.run(scenario())
 

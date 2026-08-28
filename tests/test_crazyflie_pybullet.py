@@ -8,6 +8,14 @@ import numpy as np
 from embodied_agent.embodiments.crazyflie_pybullet import CrazyfliePyBullet
 
 
+class FakeController:
+    def __init__(self) -> None:
+        self.reset_count = 0
+
+    def reset(self) -> None:
+        self.reset_count += 1
+
+
 class FakeVelocityAviary:
     SPEED_LIMIT = 0.05
 
@@ -23,6 +31,7 @@ class FakeVelocityAviary:
         self.position = self.initial_position.copy()
         self.closed = False
         self.reset_seeds: list[int | None] = []
+        self.ctrl = [FakeController()]
 
     def _obs(self) -> np.ndarray:
         obs = np.zeros((1, 20), dtype=np.float32)
@@ -76,7 +85,7 @@ class CrazyfliePyBulletTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_reset_restores_initial_state_and_tracks_seed(self) -> None:
+    def test_reset_restores_initial_state_seed_and_controller_state(self) -> None:
         async def scenario() -> None:
             robot = CrazyfliePyBullet(
                 env_factory=FakeVelocityAviary,
@@ -86,7 +95,9 @@ class CrazyfliePyBulletTests(unittest.TestCase):
             )
             await robot.connect()
             env = robot._env
+            controller = env.ctrl[0]
             self.assertEqual(env.reset_seeds, [7])
+            self.assertEqual(controller.reset_count, 1)
 
             takeoff = await robot.execute("takeoff", altitude_m=0.5)
             self.assertTrue(takeoff.ok)
@@ -96,6 +107,7 @@ class CrazyfliePyBulletTests(unittest.TestCase):
             self.assertEqual(reset.data["seed"], 123)
             self.assertEqual(robot.seed, 123)
             self.assertEqual(env.reset_seeds[-1], 123)
+            self.assertEqual(controller.reset_count, 2)
             self.assertAlmostEqual(reset.data["position_m"][0], 0.0, delta=1e-6)
             self.assertAlmostEqual(reset.data["position_m"][1], 0.0, delta=1e-6)
             self.assertAlmostEqual(reset.data["position_m"][2], 0.1, delta=1e-6)
@@ -104,8 +116,31 @@ class CrazyfliePyBulletTests(unittest.TestCase):
             self.assertTrue(repeat.ok)
             self.assertEqual(repeat.data["seed"], 123)
             self.assertEqual(env.reset_seeds[-1], 123)
+            self.assertEqual(controller.reset_count, 3)
 
             await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_controller_reset_failure_propagates(self) -> None:
+        class FailingController:
+            def reset(self) -> None:
+                raise RuntimeError("controller reset failed")
+
+        class FailingResetEnv(FakeVelocityAviary):
+            def __init__(self, **kwargs) -> None:
+                super().__init__(**kwargs)
+                self.ctrl = []
+
+        async def scenario() -> None:
+            robot = CrazyfliePyBullet(env_factory=FailingResetEnv)
+            await robot.connect()
+            robot._env.ctrl = [FailingController()]
+            try:
+                with self.assertRaisesRegex(RuntimeError, "controller reset failed"):
+                    await robot.execute("reset")
+            finally:
+                await robot.disconnect()
 
         asyncio.run(scenario())
 
