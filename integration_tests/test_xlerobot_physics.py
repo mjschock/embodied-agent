@@ -57,13 +57,52 @@ class XLeRobotPhysicsIntegrationTests(unittest.TestCase):
                     yaw_rad=0.12,
                     max_duration_s=4.0,
                 )
-                self.assertTrue(navigate.ok, navigate.detail)
+                self.assertTrue(navigate.ok, f"{navigate.detail} data={navigate.data}")
                 self.assertLessEqual(
                     navigate.data["position_error_m"], robot.position_tolerance_m
                 )
                 self.assertLessEqual(
                     abs(navigate.data["yaw_error_rad"]), robot.yaw_tolerance_rad
                 )
+            finally:
+                await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_sequential_eval_waypoints_in_real_upstream_mujoco(self) -> None:
+        async def scenario() -> None:
+            runtime_root = os.environ.get("XLEROBOT_UPSTREAM_ROOT")
+            self.assertTrue(runtime_root, "XLEROBOT_UPSTREAM_ROOT must point to the pinned upstream checkout")
+
+            robot = XLeRobotMuJoCo(
+                runtime_root=runtime_root,
+                position_tolerance_m=0.05,
+                yaw_tolerance_rad=0.06,
+            )
+            await robot.connect()
+            try:
+                for label, x_m, y_m in (
+                    ("workbench-a", 1.5, 0.5),
+                    ("workbench-b", -1.0, 1.25),
+                    ("workbench-c", 0.75, -1.5),
+                ):
+                    result = await robot.execute(
+                        "navigate_to",
+                        x_m=x_m,
+                        y_m=y_m,
+                        yaw_rad=0.0,
+                        max_duration_s=10.0,
+                    )
+                    self.assertTrue(
+                        result.ok,
+                        f"{label}: {result.detail} data={result.data}",
+                    )
+                    self.assertLessEqual(
+                        result.data["position_error_m"], robot.position_tolerance_m
+                    )
+                    self.assertLessEqual(
+                        abs(result.data["yaw_error_rad"]), robot.yaw_tolerance_rad
+                    )
             finally:
                 await robot.disconnect()
 
