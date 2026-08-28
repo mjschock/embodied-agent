@@ -127,6 +127,22 @@ The three raw measured samples were approximately 13.84 ms, 13.37 ms, and 13.31 
 
 These values are accelerated MuJoCo/controller compute latency for a fixed simulation task, not the elapsed duration a physical mobile base would require to drive the requested pose. The explicit 4-second value is a simulation-time safety budget, not the measured wall-clock execution time.
 
+## Pinned Crazyflie flight sample
+
+Crazyflie flight is also stateful. The pinned benchmark reconstructs and re-seeds `VelocityAviary` before **every** measured attempt, then verifies the initial position is `(0, 0, 0.1)` m. For `goto` and `land`, it additionally performs a validated, unmeasured takeoff to 0.4 m before the benchmark clock starts. This ensures the three samples for each skill begin from comparable simulator states.
+
+On the successful PR #31 validation run, all **9/9 semantic attempts succeeded**:
+
+| Probe | Success | Mean ms | p50 ms | p95 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| takeoff | 3/3 | 47.44 | 46.85 | 48.59 | 48.79 |
+| goto-short-translation | 3/3 | 34.43 | 34.39 | 34.61 | 34.64 |
+| land | 3/3 | 42.21 | 42.28 | 42.33 | 42.33 |
+
+Aggregate success rate was **1.0** and aggregate mean measured latency was **41.36 ms** across 9 attempts. Raw takeoff samples were approximately 48.79, 46.68, and 46.85 ms; short-translation samples were 34.64, 34.39, and 34.27 ms; landing samples were 42.04, 42.33, and 42.28 ms.
+
+Environment construction, deterministic seeding, precondition takeoff, and validation observations are all excluded from the measured interval. As with the other simulator samples, these values describe accelerated PyBullet/controller compute time for the pinned task—not physical flight duration.
+
 ## Timing interpretation
 
 The CI gates deliberately enforce reliability and structural timing invariants rather than absolute millisecond ceilings, because hosted-runner performance can vary. Physics compute latency, simulated physical duration, and eventual real-hardware wall-clock duration are separate quantities and should not be conflated.
