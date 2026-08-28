@@ -15,7 +15,8 @@ The current upstream policy contract is:
 - action: 14 servo joint targets;
 - walking command: forward/backward velocity plus yaw rate; lateral walking is not exposed;
 - episodic kick policies: left or right foot;
-- stand policy: also used as the get-up/fall-recovery policy.
+- episodic `roulade` policy: intentionally rolls the robot and returns upright;
+- standing policy: holds/returns to standing from its supported posture, but is not exposed as generic arbitrary-fall recovery.
 
 `embodied-agent` does not expose the 14 joint targets to the high-level agent. The agent sees only semantic skills.
 
@@ -43,10 +44,11 @@ Provide paths to exported ONNX policies. A typical configuration uses the polici
 - `BEST_alpha_stand.onnx`
 - `ball_kick_left.onnx`
 - `ball_kick_right.onnx`
+- `roulade.onnx`
 
 See `configs/microduck_sim.example.json` for the config shape.
 
-Both kick policies are required before the adapter advertises the `KICK` capability. This prevents an agent from seeing a generic `kick(foot=...)` tool when only one side can actually execute it.
+Both kick policies are required before the adapter advertises the `KICK` capability. This prevents an agent from seeing a generic `kick(foot=...)` tool when only one side can actually execute it. The `ROLL` capability is exposed only when `roulade.onnx` is configured.
 
 ## Semantic skills
 
@@ -70,16 +72,15 @@ After each bounded walking call, the adapter returns the policy to standing with
 
 Accepts only `foot="left"` or `foot="right"`. The selected ONNX behavior runs as a bounded one-shot and then hands control back to standing.
 
-### `microduck.recover`
+### `microduck.roll`
 
-Recovery mirrors the current simulator behavior rather than silently resetting the robot:
+Runs the official `roulade.onnx` behavior as a bounded one-shot, then hands control back to the standing policy and verifies the robot is upright. This is an intentional learned trick, not a generic fall-recovery primitive.
 
-1. allow the fallen body to settle briefly;
-2. switch to the standing/get-up policy with zero commands;
-3. require a continuous upright interval before reporting success;
-4. return a failed `SkillResult` if the bounded recovery window expires.
+## Falls and reset
 
-A failed recovery therefore remains observable to the agent/eval layer.
+The current official browser simulator does not expose arbitrary-fall get-up as a semantic capability for the walking policy. A genuinely fallen/dead pose is handled as a reset condition. `embodied-agent` therefore does **not** advertise `microduck.recover`; doing so would overstate the available policy capability.
+
+`microduck.reset` remains a safe, explicit reset to the model's real `STAND` keyframe.
 
 ## Example config
 
