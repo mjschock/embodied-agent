@@ -58,6 +58,8 @@
 - [ ] Record/version live LLM benchmark results for model comparisons
 - [ ] Add broader perception-update / stale-plan benchmark cases
 - [x] Run the same suite against physics-backed simulator adapters
+- [x] Add physics-backed `AgentModel` comparison harness with oracle MCP real-simulator gate
+- [x] Add live OpenAI physics comparison command
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
