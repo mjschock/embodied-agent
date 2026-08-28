@@ -29,10 +29,10 @@
 - [x] Make tool exposure config-driven
 - [x] Add shared world entities and task execution state
 - [x] Add late-bound world entity references for cross-embodiment targets
-- [ ] Expose read-only world state to the high-level planner / MCP host
+- [x] Expose read-only live world state through MCP resources
 - [ ] Add perception-to-world entity updates
 - [ ] Add bounded retries and failure recovery
-- [ ] Add an LLM planner that consumes the MCP tool surface
+- [ ] Add an LLM planner that consumes MCP resources and tools
 
 ## M3 — Evals
 - [x] Add dependency-free three-robot baseline eval suite
