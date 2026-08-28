@@ -14,6 +14,7 @@ dependencies = []
 embodied-agent-mcp = "embodied_agent.mcp.__main__:main"
 embodied-agent-run = "embodied_agent.mcp.openai_cli:main"
 embodied-agent-eval-openai = "embodied_agent.evals.openai_agent:main"
+embodied-agent-eval-openai-four = "embodied_agent.evals.openai_four_embodiment:main"
 embodied-agent-eval-openai-physics = "embodied_agent.evals.openai_physics_agent:main"
 
 [project.optional-dependencies]
