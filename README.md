@@ -4,9 +4,10 @@ A simulation-first, multi-embodiment robotics platform for controlling:
 
 - **XLeRobot** — mobile manipulation
 - **Crazyflie** — aerial perception and navigation
+- **Microduck** — learned locomotion and low-cost sim2real RL
 - **LeRobot Humanoid** — legged / humanoid mobility
 
-The design goal is **one high-level agent with stable semantic skills**, while each robot keeps its own low-level controller, simulator, and eventual physical hardware backend.
+The design goal is **one high-level agent with stable semantic skills**, while each robot keeps its own low-level controller, simulator, learned policies, and eventual physical hardware backend.
 
 ## Core principle
 
@@ -17,6 +18,9 @@ crazyflie.takeoff
 crazyflie.goto
 crazyflie.land
 xlerobot.navigate_to
+microduck.walk_velocity
+microduck.kick
+microduck.roll
 humanoid.stand
 humanoid.walk_velocity   # only when a locomotion policy is configured
 ```
@@ -42,22 +46,17 @@ Schema-validated tool router
           v
 Semantic skill API
           |
-      +---+----------------+----------------+
-      |                    |                |
-      v                    v                v
-   XLeRobot            Crazyflie        Humanoid
-      |                    |                |
-   sim/real              sim/real          sim/real
+      +-----------+-----------+-----------+-----------+
+      |           |           |           |
+      v           v           v           v
+   XLeRobot   Crazyflie   Microduck    Humanoid
+      |           |           |           |
+   sim/real     sim/real     sim/real     sim/real
 ```
 
 ## Why this abstraction
 
-This lets the project evolve through four stages without rewriting the agent:
-
-1. XLeRobot sim + Crazyflie sim + Humanoid sim
-2. XLeRobot real + Crazyflie sim + Humanoid sim
-3. XLeRobot real + Crazyflie real + Humanoid sim
-4. XLeRobot real + Crazyflie real + Humanoid real
+The simulator or hardware implementation can change without rewriting the high-level agent. XLeRobot can move from MuJoCo to physical mobile manipulation, Crazyflie from PyBullet to `cflib`, Microduck from native MuJoCo/ONNX to its onboard policy runtime, and the humanoid from the current biped simulator to a future whole-body LeRobot backend while preserving semantic agent skills.
 
 LeRobot fits primarily at the **robot-learning/data/policy layer**, not as a universal physics simulator.
 
@@ -68,6 +67,7 @@ The repository now contains:
 - a common asynchronous `Embodiment` interface and capability registry;
 - a real Crazyflie `gym-pybullet-drones` `VelocityAviary` adapter;
 - an upstream XLeRobot MuJoCo base-navigation adapter;
+- a policy-backed Microduck native MuJoCo/ONNX adapter with `stand`, `walk_velocity`, `kick`, and `roll`;
 - an official LeRobot Humanoid MuJoCo controller adapter;
 - optional policy-backed humanoid `walk_velocity` control;
 - a config-driven robot stack;
@@ -79,10 +79,10 @@ The repository now contains:
 - a deterministic capability planner and sequential executor;
 - an iterative provider-agnostic `MCPAgentRunner` that refreshes world state before every model decision;
 - an optional OpenAI Responses API `AgentModel` using Structured Outputs for one decision at a time;
-- a dependency-free three-robot coordination benchmark with planning and execution metrics;
-- deterministic simulator/agent contract tests.
+- dependency-free and real-physics three-robot coordination benchmarks with planning/execution metrics;
+- deterministic simulator/agent contract tests and pinned real-simulator CI gates.
 
-XLeRobot arm actuation is intentionally not agent-accessible yet. `MANIPULATE` will only be enabled after a LeRobot/VLA policy owns that lower-level control path.
+XLeRobot arm actuation is intentionally not agent-accessible yet. `MANIPULATE` will only be enabled after a LeRobot/VLA policy owns that lower-level control path. Microduck likewise exposes learned semantic behaviors rather than its 14 raw policy joint targets. The current Microduck walking/standing stack does **not** advertise arbitrary-fall recovery; `roll` is the separate learned `roulade` behavior and true dead/fallen states remain explicit reset conditions.
 
 ## Quick start
 
@@ -99,6 +99,7 @@ The dependency-free demo and baseline eval do not require physics packages. Real
 ```bash
 pip install -e ".[crazyflie-sim]"
 pip install -e ".[xlerobot-sim]"
+pip install -e ".[microduck-sim]"
 pip install -e ".[humanoid-sim]"
 ```
 
@@ -124,11 +125,11 @@ embodied-agent-run \
 
 The project deliberately does not hard-code an OpenAI model. See `docs/openai_agent.md` for the provider contract and safety layers.
 
-XLeRobot and humanoid MuJoCo adapters also require their upstream runtime/model checkouts; see `docs/xlerobot_setup.md` and `docs/humanoid_setup.md`.
+XLeRobot, Microduck, and humanoid MuJoCo adapters also require their upstream runtime/model or policy assets; see `docs/xlerobot_setup.md`, `docs/microduck_setup.md`, and `docs/humanoid_setup.md`.
 
 ## Agent layer
 
-`configs/all_sim.json` declares both the embodiment adapter and the skills that may be exposed to an agent. The router filters that allowlist against the robot's actual capabilities.
+`configs/all_sim.json` declares both the embodiment adapter and the skills that may be exposed to an agent. The router filters that allowlist against the robot's actual capabilities. Microduck is currently opt-in via `configs/microduck_sim.example.json` so the existing three-robot baseline remains unchanged.
 
 ```python
 from embodied_agent.agent import build_stack, load_config
@@ -194,13 +195,13 @@ The OpenAI implementation uses Structured Outputs for the decision envelope, but
 
 ## Evals
 
-The first benchmark coordinates all three embodiments across three waypoint variants. It separately reports robot-selection accuracy, exact plan match, task completion, tool-call success, and execution coverage.
+The established benchmark coordinates XLeRobot, Crazyflie, and the LeRobot Humanoid across three waypoint variants. It separately reports robot-selection accuracy, exact plan match, task completion, tool-call success, and execution coverage.
 
 ```bash
 python -m embodied_agent.evals.multi_robot
 ```
 
-The benchmark currently runs against scripted embodiments so orchestration regressions are isolated from physics. Its waypoints are shared world entities consumed by both Crazyflie and XLeRobot. It also includes a failure-injection test proving that correct planning can be distinguished from downstream execution failure. The MCP agent loop is separately contract-tested across all three embodiments. See `docs/evals.md`.
+The same benchmark is CI-verified against real PyBullet/MuJoCo adapters and through the oracle `AgentModel` → MCP path. Microduck currently has its own pinned learned-policy physics smoke; dedicated Microduck skill and multi-embodiment eval cases are the next eval layer. See `docs/evals.md`.
 
 ## Simulator backends
 
@@ -209,6 +210,9 @@ The benchmark currently runs against scripted embodiments so orchestration regre
 
 ### Crazyflie
 `CrazyfliePyBullet` uses `gym-pybullet-drones` `VelocityAviary`. The agent sees position-level `takeoff`, `goto`, and `land` skills while velocity/PID/RPM control remains beneath the adapter.
+
+### Microduck
+`MicroduckMuJoCo` loads Pollen's native Microduck MuJoCo model and delegates the 61-D observation → ONNX inference → 14-action mapping to the upstream CPU inference reference. The agent sees bounded `stand`, longitudinal/yaw `walk_velocity`, enum-validated left/right `kick`, and the learned `roll`/`roulade` one-shot. The adapter returns to standing after bounded behaviors and never exposes raw learned-policy joint targets. See `docs/microduck_setup.md`.
 
 ### LeRobot Humanoid
 `HumanoidMuJoCo` wraps the official LeRobot Humanoid `SimBipedalRobotController` for reset, stand, and normalized observation state. When configured with an official `RLAgent` policy directory it also exposes a bounded `walk_velocity` skill; `walk_to` remains deferred until closed-loop navigation is implemented.
@@ -227,13 +231,15 @@ embodied-agent/
 │   └── demo.py
 ├── configs/
 ├── docs/
+├── integration_tests/
 ├── tests/
 └── pyproject.toml
 ```
 
 ## Next milestones
 
-1. Add a trusted perception-to-world update path and stale-plan/perception evals.
-2. Compare the live LLM agent against the deterministic planning baseline.
-3. Run the coordination suite against physics-backed simulators.
+1. Record the first credentialed live-LLM result against the deterministic physics baseline.
+2. Add Microduck learned-policy skill and multi-embodiment eval cases.
+3. Add broader perception-update / stale-plan evals.
 4. Add bounded retry/failure-recovery policies.
+5. Preserve the Microduck semantic interface when moving from simulation to the physical robot.
