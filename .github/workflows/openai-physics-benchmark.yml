@@ -1,0 +1,116 @@
+name: openai-physics-benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: OpenAI model ID to benchmark
+        required: true
+        type: string
+      max_steps:
+        description: Maximum semantic robot actions per case
+        required: true
+        default: "8"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Vector-Wangel/XLeRobot
+          ref: 3d14695e40c9c68229c0aacffca6053c75cd3eb6
+          path: .vendor/XLeRobot
+      - uses: actions/checkout@v4
+        with:
+          repository: huggingface/lerobot-humanoid-runtime
+          ref: e4dc62795e83b2e69580cad4d3229bdb558e912e
+          path: .vendor/lerobot-humanoid-runtime
+      - uses: actions/checkout@v4
+        with:
+          repository: huggingface/lerobot-humanoid-model
+          ref: 222717c3faeef21709a578a088c267c8a5f4a4a9
+          path: .vendor/lerobot-humanoid-runtime/robot/lerobot-humanoid-model
+      - name: Require OpenAI credential
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Repository secret OPENAI_API_KEY is not configured."
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - name: Install combined simulator and OpenAI agent runtime
+        run: |
+          pip install "numpy>=2.5" "scipy>=1.18" "pillow>=12.3" "pybullet>=3.2.7" "gymnasium>=1.3" "transforms3d>=0.4"
+          pip install --no-deps "gym-pybullet-drones @ git+https://github.com/learnsyslab/gym-pybullet-drones.git@24fccff4da746badb6eaa9f5055cd5d9b6613160"
+          pip install -e ".[xlerobot-sim,humanoid-sim,openai-agent]"
+      - name: Run live model comparison
+        id: benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL_ID: ${{ inputs.model }}
+          MAX_STEPS: ${{ inputs.max_steps }}
+          PYBULLET_EGL: "0"
+          XLEROBOT_UPSTREAM_ROOT: ${{ github.workspace }}/.vendor/XLeRobot
+          LEROBOT_HUMANOID_RUNTIME_ROOT: ${{ github.workspace }}/.vendor/lerobot-humanoid-runtime
+        run: |
+          mkdir -p benchmark-results
+          set +e
+          embodied-agent-eval-openai-physics \
+            --model "$MODEL_ID" \
+            --max-steps "$MAX_STEPS" \
+            --output benchmark-results/openai-physics.json \
+            | tee benchmark-results/stdout.json
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          if [ ! -s benchmark-results/openai-physics.json ]; then
+            echo "::error::Benchmark did not produce a result record."
+            exit "$status"
+          fi
+      - name: Summarize benchmark
+        env:
+          BENCHMARK_EXIT_CODE: ${{ steps.benchmark.outputs.exit_code }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+
+          record = json.loads(Path("benchmark-results/openai-physics.json").read_text())
+          result = record["result"]
+          deterministic = result["deterministic"]
+          agent = result["agent"]
+          comparison = result["comparison"]
+          print("# OpenAI physics benchmark")
+          print()
+          print(f"- Model: `{record['model']}`")
+          print(f"- Repository revision: `{record['environment'].get('repository_revision')}`")
+          print(f"- Max steps: {record['max_steps']}")
+          print(f"- Deterministic task completion: {deterministic['task_completion_rate']:.3f}")
+          print(f"- Agent strict task success: {agent['strict_task_success_rate']:.3f}")
+          print(f"- Agent tool selection accuracy: {agent['tool_selection_accuracy']:.3f}")
+          print(f"- Agent argument accuracy: {agent['argument_accuracy']:.3f}")
+          print(f"- Agent tool execution success: {agent['tool_execution_success_rate']:.3f}")
+          print(f"- Agent action efficiency: {agent['mean_action_efficiency']:.3f}")
+          print(f"- Strict task success gap: {comparison['strict_task_success_gap']:+.3f}")
+          print(f"- CLI perfect-score exit code: {os.environ['BENCHMARK_EXIT_CODE']}")
+          PY
+      - name: Upload benchmark record
+        uses: actions/upload-artifact@v4
+        with:
+          name: openai-physics-${{ github.run_id }}
+          path: benchmark-results/
+          if-no-files-found: error
+          retention-days: 30

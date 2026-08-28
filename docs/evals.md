@@ -1,6 +1,6 @@
 # Evals
 
-The evaluation stack separates planning/model quality from robot control quality. The first benchmarks use scripted embodiments so orchestration can be measured before physics or hardware noise is introduced.
+The evaluation stack separates planning/model quality from robot control quality. Scripted embodiments isolate orchestration behavior first; upstream-backed physics adapters then test whether the same semantic contracts survive real simulator dynamics.
 
 ## Deterministic capability-planner baseline
 
@@ -48,7 +48,7 @@ CI pins the upstream simulator/model revisions and requires the deterministic ph
 
 ## AgentModel benchmark
 
-The same natural-language cases can now evaluate any provider implementing the `AgentModel` interface:
+The same natural-language cases can evaluate any provider implementing the `AgentModel` interface:
 
 ```bash
 python -m embodied_agent.evals.agent_model
@@ -56,7 +56,7 @@ python -m embodied_agent.evals.agent_model
 
 That command uses an `ExpectedActionModel` oracle only to validate the benchmark itself; it should score 1.0 on every metric. Actual LLM providers use the same evaluator but must infer the robot/tool sequence and grounded coordinates from the instruction, MCP tool schemas, and live world state.
 
-The model is run through the real `MCPAgentRunner` and in-memory MCP v2 server. The robot backends remain scripted, so a model benchmark measures high-level decisions without physics variance.
+The model is run through the real `MCPAgentRunner` and in-memory MCP v2 server. The default model benchmark keeps robot backends scripted, so high-level decisions can be measured without physics variance.
 
 ### AgentModel metrics
 
@@ -68,7 +68,7 @@ The model is run through the real `MCPAgentRunner` and in-memory MCP v2 server. 
 
 `arguments_exact_match_rate` is the fraction of cases where all expected actions have correct task-relevant arguments and there are no extra actions.
 
-`tool_execution_success_rate` measures whether the selected semantic actions mechanically executed in the scripted robot environment. This can remain high even when the model navigates to the wrong in-bounds coordinate, which is why argument accuracy is scored separately.
+`tool_execution_success_rate` measures whether the selected semantic actions mechanically executed in the current robot environment. This can remain high even when the model navigates to the wrong in-bounds coordinate, which is why argument accuracy is scored separately.
 
 `runner_finish_rate` measures whether the model eventually returned a finish decision. This is not a task-success metric: a model that immediately says "done" can score 1.0 here and still score 0.0 strict task success.
 
@@ -86,9 +86,21 @@ The test suite includes adversarial models to verify that the metrics do not col
 - a model choosing the right robots with one wrong target coordinate keeps perfect tool selection but loses argument accuracy and strict success;
 - a model that performs the entire correct sequence plus an unnecessary extra action keeps tool execution success but loses exact-match/strict success and action efficiency.
 
-## Optional live OpenAI benchmark
+## Physics-backed AgentModel comparison
 
-After installing the optional OpenAI provider and configuring an API key/model, the same scripted benchmark can be run against a live OpenAI model:
+`physics_agent_model.py` runs the deterministic planner and an `AgentModel` on fresh, equivalently configured physics stacks and reports both result sets plus direct score gaps. Within each path the same connected XLeRobot, Crazyflie, and humanoid instances are reused across workbench A → B → C, preserving sequential embodiment state.
+
+The CI integration gate uses `ExpectedActionModel`, an oracle rather than an LLM, to prove that the complete high-level path can achieve the deterministic reference through:
+
+```text
+AgentModel → MCPAgentRunner → MCP → RobotToolRouter → semantic skills → real simulators
+```
+
+Both deterministic and oracle AgentModel physics paths are required to score 1.0 in CI. This validates the transport/execution harness without pretending to measure live-model quality.
+
+## Optional live OpenAI benchmarks
+
+After installing the optional OpenAI provider and configuring an API key/model, the scripted benchmark can be run against a live OpenAI model:
 
 ```bash
 pip install -e ".[openai-agent]"
@@ -97,15 +109,41 @@ export EMBODIED_AGENT_OPENAI_MODEL="YOUR_MODEL_ID"
 embodied-agent-eval-openai
 ```
 
-This command sends model requests to the OpenAI API and may incur API usage/cost. It **does not** connect to physical robots or physics simulators; only the high-level model decisions are live. Each case remains bounded by `--max-steps` (default 8).
+For the real-simulator comparison, install the simulator extras, provide the upstream checkouts, and run:
 
-The command exits successfully only when `strict_task_success_rate == 1.0`, making it suitable for an explicit manual model-quality gate. It is not part of CI and CI never calls the OpenAI API.
+```bash
+pip install -e ".[xlerobot-sim,humanoid-sim,openai-agent]"
+export OPENAI_API_KEY="..."
+export XLEROBOT_UPSTREAM_ROOT="/path/to/XLeRobot"
+export LEROBOT_HUMANOID_RUNTIME_ROOT="/path/to/lerobot-humanoid-runtime"
+
+embodied-agent-eval-openai-physics \
+  --model "YOUR_MODEL_ID" \
+  --output benchmark-results/openai-physics.json
+```
+
+The physics command first runs a fresh deterministic reference and then a fresh live-model stack. It emits a schema-versioned JSON record containing model identity, timestamp, step budget, repository/upstream revisions where detectable, complete deterministic/model metrics, and direct score deltas. The command's process exit code is 0 only when both the deterministic reference and live model achieve perfect task completion/strict success.
+
+Live model calls may incur API usage/cost. No physical hardware is used.
+
+## Manual GitHub Actions live-physics run
+
+The `openai-physics-benchmark` workflow is intentionally `workflow_dispatch` only. It requires a repository secret named `OPENAI_API_KEY`, plus an explicit model ID and maximum-step budget at dispatch time. The workflow:
+
+1. checks out the exact pinned XLeRobot and LeRobot Humanoid sources used by the physics CI stack;
+2. installs the pinned Crazyflie simulator and OpenAI agent runtime;
+3. runs the deterministic-vs-live-model physics comparison;
+4. writes and uploads the self-describing JSON result record;
+5. writes headline metrics and model-vs-deterministic gaps to the GitHub Actions job summary.
+
+A live model scoring below 1.0 is treated as an evaluation result, not an infrastructure failure: if a valid result record is produced, the workflow still uploads it. Execution/authentication failures that prevent a record from being created do fail the workflow.
+
+Selected records can be checked into `eval_results/` for long-term model comparisons. See `eval_results/README.md`.
 
 ## Next eval layers
 
-- record live LLM results over time and compare models against the deterministic/oracle references;
-- add perception-update and stale-plan tests where the target changes after an early action;
-- run an LLM `AgentModel` through the physics-backed simulator suite;
+- run and version the first live LLM physics result, then compare models over time;
+- add broader perception-update and stale-plan tests where the target changes after an early action;
 - add single-robot skill reliability and latency metrics;
 - add bounded recovery tasks where the first tool call fails;
 - add simulator reproducibility metrics;

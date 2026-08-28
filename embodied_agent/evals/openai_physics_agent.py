@@ -8,6 +8,13 @@ import os
 from embodied_agent.mcp import OpenAIAgentModel
 
 from .physics_agent_model import compare_physics_agent_to_deterministic
+from .result_record import (
+    build_result_record,
+    physics_environment_metadata,
+    write_result_record,
+)
+
+BENCHMARK_NAME = "three-robot-physics-comparison"
 
 
 async def run_openai_physics_comparison(
@@ -55,6 +62,14 @@ def _parser() -> argparse.ArgumentParser:
         default=8,
         help="Maximum semantic robot actions per case (default: 8).",
     )
+    parser.add_argument(
+        "--output",
+        default=os.getenv("EMBODIED_AGENT_EVAL_OUTPUT", ""),
+        help=(
+            "Optional JSON record path. The record includes model, timestamp, repository/upstream "
+            "revisions, and the full deterministic/model comparison payload."
+        ),
+    )
     return parser
 
 
@@ -85,7 +100,21 @@ def main() -> int:
             max_steps=args.max_steps,
         )
     )
-    print(json.dumps(payload, indent=2, sort_keys=True))
+    record = build_result_record(
+        benchmark=BENCHMARK_NAME,
+        provider="openai",
+        model=args.model,
+        max_steps=args.max_steps,
+        result=payload,
+        environment=physics_environment_metadata(
+            xlerobot_runtime_root=args.xlerobot_runtime_root,
+            humanoid_runtime_root=args.humanoid_runtime_root,
+        ),
+    )
+    if args.output.strip():
+        write_result_record(record, args.output)
+    print(json.dumps(record, indent=2, sort_keys=True))
+
     deterministic_ok = payload["deterministic"]["task_completion_rate"] == 1.0
     agent_ok = payload["agent"]["strict_task_success_rate"] == 1.0
     return 0 if deterministic_ok and agent_ok else 1
