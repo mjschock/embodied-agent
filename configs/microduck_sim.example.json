@@ -1,0 +1,22 @@
+{
+  "robots": {
+    "microduck": {
+      "adapter": "microduck_mujoco",
+      "params": {
+        "runtime_root": "/path/to/microduck_rl",
+        "walking_policy_path": "/path/to/BEST_alpha_walking.onnx",
+        "standing_policy_path": "/path/to/BEST_alpha_stand.onnx",
+        "kick_left_policy_path": "/path/to/ball_kick_left.onnx",
+        "kick_right_policy_path": "/path/to/ball_kick_right.onnx"
+      },
+      "tools": [
+        "observe",
+        "reset",
+        "stand",
+        "walk_velocity",
+        "kick",
+        "recover"
+      ]
+    }
+  }
+}
