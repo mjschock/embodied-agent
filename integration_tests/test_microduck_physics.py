@@ -65,8 +65,11 @@ class MicroduckPhysicsIntegrationTests(unittest.TestCase):
 
                 roll = await robot.execute("roll")
                 self.assertTrue(roll.ok, roll.data)
+                self.assertTrue(roll.data["completed"], roll.data)
+                self.assertTrue(roll.data["tipped"], roll.data)
                 self.assertTrue(roll.data["upright"], roll.data)
                 self.assertLess(float(roll.data["projected_gravity"][2]), -0.85, roll.data)
+                self.assertFalse(roll.data["reset_after_timeout"], roll.data)
 
                 reset = await robot.execute("reset")
                 self.assertTrue(reset.ok, reset.data)
