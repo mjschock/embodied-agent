@@ -54,6 +54,25 @@ Failed `SkillResult` values and raised exceptions both count as failed attempts.
 
 p50 and p95 use linear interpolation over the measured sample latencies. Unit tests inject a deterministic clock, so the metric contract is not dependent on scheduler timing or real sleeps.
 
+## Pinned Microduck sample
+
+The first physics-backed application runs inside the pinned `microduck-physics` workflow against the real Microduck MuJoCo/ONNX adapter. It measures three attempts each of `stand`, left kick, right kick, and learned `roll`.
+
+On the successful PR #27 validation run, all **12/12 semantic attempts succeeded**. The wall-clock measurements on that GitHub Actions CPU runner were:
+
+| Probe | Success | Mean ms | p50 ms | p95 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| stand | 3/3 | 15.94 | 15.91 | 16.29 | 16.33 |
+| kick-left | 3/3 | 17.25 | 17.76 | 17.96 | 17.98 |
+| kick-right | 3/3 | 16.06 | 15.59 | 17.05 | 17.21 |
+| roll | 3/3 | 49.24 | 48.03 | 57.58 | 58.64 |
+
+Aggregate success rate was **1.0** and aggregate mean wall-clock latency was **24.62 ms** across 12 attempts.
+
+These latency numbers are **accelerated-simulation compute time, not physical action duration**. For example, the kick policy represents roughly 0.5 seconds of simulated behavior and roll may cover up to 3 seconds of simulated behavior, yet MuJoCo/ONNX executes those simulated control steps faster than real time on the CI CPU. The values are useful for tracking simulator/runtime regressions on comparable runners, not for claiming how long a physical Microduck would take to move.
+
+The CI gate deliberately enforces reliability and structural timing invariants rather than absolute millisecond ceilings, because hosted-runner performance can vary.
+
 ## Applying this to physics and hardware
 
 The metric layer intentionally does not define universal pass/fail latency thresholds. Different skills have different physical durations: `microduck.roll`, a Crazyflie transit, and `humanoid.stand` should not be compared as if they were equivalent operations.
