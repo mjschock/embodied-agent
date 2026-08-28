@@ -18,7 +18,7 @@
 - [x] Smoke-test XLeRobot adapter against a local upstream checkout
 - [ ] Attach XLeRobot arm/VLA policy before enabling `MANIPULATE`
 - [x] Add policy-backed Microduck MuJoCo adapter with stand/walk/kick/roll skills
-- [ ] Smoke-test Microduck against pinned native runtime + official Space policies
+- [x] Smoke-test Microduck against pinned native runtime + official Space policies
 - [ ] Normalize observations
 - [ ] Add simulator reset/seed support
 - [ ] Record episode traces
