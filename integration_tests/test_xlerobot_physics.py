@@ -7,6 +7,7 @@ import unittest
 
 from embodied_agent.core import Capability
 from embodied_agent.embodiments import XLeRobotMuJoCo
+from embodied_agent.evals.reproducibility import benchmark_reproducibility
 from embodied_agent.evals.skill_metrics import SkillProbe, benchmark_robot_skills
 
 
@@ -133,6 +134,61 @@ class XLeRobotPhysicsIntegrationTests(unittest.TestCase):
             self.assertIsNotNone(metric.successful_mean_latency_ms)
             self.assertTrue(all(sample.ok for sample in metric.samples))
             self.assertTrue(all(sample.error == "" for sample in metric.samples))
+
+        asyncio.run(scenario())
+
+    def test_reset_navigation_episode_is_reproducible(self) -> None:
+        async def scenario() -> None:
+            runtime_root = os.environ.get("XLEROBOT_UPSTREAM_ROOT")
+            self.assertTrue(runtime_root, "XLEROBOT_UPSTREAM_ROOT must point to the pinned upstream checkout")
+
+            robot = XLeRobotMuJoCo(
+                runtime_root=runtime_root,
+                position_tolerance_m=0.04,
+                yaw_tolerance_rad=0.06,
+            )
+            await robot.connect()
+
+            async def run_episode(attempt: int):
+                reset = await robot.execute("reset")
+                if not reset.ok:
+                    raise RuntimeError(reset.detail)
+                navigate = await robot.execute(
+                    "navigate_to",
+                    x_m=0.10,
+                    y_m=-0.06,
+                    yaw_rad=0.12,
+                    max_duration_s=4.0,
+                )
+                if not navigate.ok:
+                    raise RuntimeError(f"episode {attempt} failed: {navigate.detail}")
+                return {
+                    "ok": navigate.ok,
+                    "final_pose": [
+                        float(navigate.data["x_m"]),
+                        float(navigate.data["y_m"]),
+                        float(navigate.data["yaw_rad"]),
+                    ],
+                    "position_error_m": float(navigate.data["position_error_m"]),
+                    "yaw_error_rad": float(navigate.data["yaw_error_rad"]),
+                    "timeout_source": str(navigate.data["timeout_source"]),
+                }
+
+            try:
+                result = await benchmark_reproducibility(
+                    run_episode,
+                    attempts=3,
+                    atol=1e-10,
+                    label="xlerobot-reset-navigate",
+                )
+            finally:
+                await robot.disconnect()
+
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+            self.assertEqual(result.comparison_count, 2)
+            self.assertEqual(result.matching_comparisons, 2)
+            self.assertEqual(result.reproducibility_rate, 1.0)
+            self.assertTrue(all(sample.matches_baseline for sample in result.samples))
 
         asyncio.run(scenario())
 
