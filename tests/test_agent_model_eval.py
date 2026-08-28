@@ -8,6 +8,7 @@ from embodied_agent.evals.agent_model import (
     evaluate_agent_model,
     run_expected_action_baseline,
 )
+from embodied_agent.evals.multi_robot import _scripted_stack
 from embodied_agent.mcp import AgentDecision
 
 
@@ -52,6 +53,21 @@ class AgentModelEvalTests(unittest.TestCase):
         self.assertEqual(result.runner_ok_rate, 1.0)
         self.assertEqual(result.strict_task_success_rate, 1.0)
         self.assertEqual(result.mean_action_efficiency, 1.0)
+
+    def test_expected_action_model_can_reuse_one_stack_across_all_cases(self) -> None:
+        registry, router = _scripted_stack()
+        result = asyncio.run(
+            evaluate_agent_model(
+                lambda case: ExpectedActionModel(case),
+                stack=(registry, router),
+            )
+        )
+        self.assertEqual(result.strict_task_success_rate, 1.0)
+        self.assertEqual(result.tool_execution_success_rate, 1.0)
+        self.assertEqual(
+            registry.get("xlerobot").state["pose"],
+            (0.75, -1.5, 0.0),
+        )
 
     def test_immediate_finish_does_not_count_as_task_success(self) -> None:
         result = asyncio.run(evaluate_agent_model(lambda case: ImmediateFinishModel()))
