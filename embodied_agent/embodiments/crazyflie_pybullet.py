@@ -34,7 +34,7 @@ class CrazyfliePyBullet(Embodiment):
         self.name = name
         self.backend = "gym-pybullet-drones"
         self.gui = gui
-        self.seed = seed
+        self.seed = self._coerce_seed(seed)
         self.ctrl_freq_hz = ctrl_freq_hz
         self.initial_position = initial_position
         self.position_tolerance_m = position_tolerance_m
@@ -95,6 +95,25 @@ class CrazyfliePyBullet(Embodiment):
         )
 
     async def execute_request(self, request: SkillRequest) -> SkillResult:
+        if request.name == "reset":
+            supplied_seed = request.params.get("seed")
+            effective_seed = (
+                self.seed if supplied_seed is None else self._coerce_seed(supplied_seed)
+            )
+            self.seed = effective_seed
+            self._obs, _ = self._require_env().reset(seed=effective_seed)
+            state = self._state_vector()
+            return SkillResult(
+                embodiment=self.name,
+                skill=request.name,
+                ok=True,
+                detail=f"Crazyflie PyBullet simulation reset with seed {effective_seed}.",
+                data={
+                    "seed": effective_seed,
+                    "position_m": state[0:3].tolist(),
+                },
+            )
+
         if request.name == "takeoff":
             altitude_m = float(request.params.get("altitude_m", 1.0))
             if altitude_m <= 0:
@@ -220,6 +239,14 @@ class CrazyfliePyBullet(Embodiment):
         if self._env is None:
             raise RuntimeError(f"{self.name} is not connected")
         return self._env
+
+    @staticmethod
+    def _coerce_seed(value: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("seed must be an integer")
+        if value < 0 or value > 2**32 - 1:
+            raise ValueError("seed must be between 0 and 4294967295")
+        return value
 
     @staticmethod
     def _coerce_position(value: Any) -> tuple[float, float, float]:
