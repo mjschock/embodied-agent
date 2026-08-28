@@ -38,7 +38,7 @@ class MicroduckSkillMetricIntegrationTests(unittest.TestCase):
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
 
         self.assertEqual(result.robot, "microduck")
-        self.assertEqual(result.backend, "microduck-rl-mujoco")
+        self.assertEqual(result.backend, "microduck_mujoco")
         self.assertEqual(result.attempt_count, 12)
         self.assertEqual(result.success_count, 12)
         self.assertEqual(result.success_rate, 1.0)
