@@ -13,7 +13,7 @@ class Capability(StrEnum):
     WALK = "walk"
     STAND = "stand"
     KICK = "kick"
-    RECOVER = "recover"
+    ROLL = "roll"
 
 
 @dataclass(frozen=True, slots=True)
