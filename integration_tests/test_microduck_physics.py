@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import os
 import unittest
 from pathlib import Path
@@ -20,6 +19,7 @@ class MicroduckPhysicsIntegrationTests(unittest.TestCase):
             standing_policy_path=policy_dir / "BEST_alpha_stand.onnx",
             kick_left_policy_path=policy_dir / "ball_kick_left.onnx",
             kick_right_policy_path=policy_dir / "ball_kick_right.onnx",
+            roll_policy_path=policy_dir / "roulade.onnx",
         )
 
         async def scenario() -> None:
@@ -31,7 +31,7 @@ class MicroduckPhysicsIntegrationTests(unittest.TestCase):
                         Capability.STAND,
                         Capability.WALK,
                         Capability.KICK,
-                        Capability.RECOVER,
+                        Capability.ROLL,
                     )
                 )
 
@@ -63,33 +63,10 @@ class MicroduckPhysicsIntegrationTests(unittest.TestCase):
                 self.assertTrue(kick.ok, kick.data)
                 self.assertEqual(kick.data["foot"], "left")
 
-                # Put the trunk on its side and let the actual stand/get-up policy
-                # recover it. This deliberately reaches beneath the semantic API
-                # only to create the integration-test fault condition.
-                runtime = robot._runtime
-                self.assertIsNotNone(runtime)
-                runtime.reset()
-                runtime.data.qpos[2] = 0.07
-                half = math.pi / 4.0
-                runtime.data.qpos[3:7] = [math.cos(half), math.sin(half), 0.0, 0.0]
-                runtime.data.qvel[:] = 0.0
-                runtime._mujoco.mj_forward(runtime.model, runtime.data)
-
-                tipped = runtime.observe()
-                self.assertGreater(
-                    float(tipped["projected_gravity"][2]),
-                    -0.85,
-                    tipped,
-                )
-
-                recovery = await robot.execute("recover")
-                self.assertTrue(recovery.ok, recovery.data)
-                self.assertTrue(recovery.data["recovered"], recovery.data)
-                self.assertLess(
-                    float(recovery.data["projected_gravity"][2]),
-                    -0.85,
-                    recovery.data,
-                )
+                roll = await robot.execute("roll")
+                self.assertTrue(roll.ok, roll.data)
+                self.assertTrue(roll.data["upright"], roll.data)
+                self.assertLess(float(roll.data["projected_gravity"][2]), -0.85, roll.data)
 
                 reset = await robot.execute("reset")
                 self.assertTrue(reset.ok, reset.data)
