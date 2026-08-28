@@ -144,6 +144,29 @@ class AgentToolTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_xlerobot_navigation_preserves_omitted_timeout(self) -> None:
+        router, xlerobot, _, _ = self._router()
+
+        async def scenario() -> None:
+            navigate_tool = next(
+                tool for tool in router.list_tools() if tool["name"] == "xlerobot.navigate_to"
+            )
+            self.assertNotIn(
+                "default",
+                navigate_tool["input_schema"]["properties"]["max_duration_s"],
+            )
+            result = await router.call(
+                "xlerobot.navigate_to",
+                {"x_m": 1.0, "y_m": -2.0},
+            )
+            self.assertTrue(result.ok)
+            request = xlerobot.calls[-1]
+            self.assertEqual(request.params["x_m"], 1.0)
+            self.assertEqual(request.params["y_m"], -2.0)
+            self.assertNotIn("max_duration_s", request.params)
+
+        asyncio.run(scenario())
+
     def test_capability_planner_binds_multi_robot_task(self) -> None:
         router, _, _, _ = self._router()
         planner = CapabilityPlanner(router)
