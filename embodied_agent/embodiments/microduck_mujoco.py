@@ -22,10 +22,8 @@ class _UpstreamMicroduckRuntime:
     MAX_BACKWARD_MPS = 0.20
     MAX_YAW_RATE_RPS = 1.0
     KICK_POLICY_S = 0.5
-    POST_KICK_SETTLE_S = 0.4
-    RECOVERY_SETTLE_STEPS = 15
-    RECOVERY_UPRIGHT_STEPS = 50
-    RECOVERY_MAX_STEPS = 300
+    ROLL_POLICY_S = 2.0
+    POST_BEHAVIOR_SETTLE_S = 0.4
     UPRIGHT_GRAVITY_Z = -0.85
 
     def __init__(
@@ -36,6 +34,7 @@ class _UpstreamMicroduckRuntime:
         standing_policy_path: str | Path,
         kick_left_policy_path: str | Path | None = None,
         kick_right_policy_path: str | Path | None = None,
+        roll_policy_path: str | Path | None = None,
         scene_path: str | Path | None = None,
     ) -> None:
         self.runtime_root = Path(runtime_root)
@@ -43,6 +42,7 @@ class _UpstreamMicroduckRuntime:
         self.standing_policy_path = Path(standing_policy_path)
         self.kick_left_policy_path = Path(kick_left_policy_path) if kick_left_policy_path else None
         self.kick_right_policy_path = Path(kick_right_policy_path) if kick_right_policy_path else None
+        self.roll_policy_path = Path(roll_policy_path) if roll_policy_path else None
         self.scene_path = Path(scene_path) if scene_path else (
             self.runtime_root / "src/mjlab_microduck/robot/microduck/scene.xml"
         )
@@ -83,7 +83,9 @@ class _UpstreamMicroduckRuntime:
             standing_onnx_path=str(self.standing_policy_path),
             kick_left_onnx_path=str(self.kick_left_policy_path) if self.kick_left_policy_path else None,
             kick_right_onnx_path=str(self.kick_right_policy_path) if self.kick_right_policy_path else None,
+            roulade_onnx_path=str(self.roll_policy_path) if self.roll_policy_path else None,
             kick_duration=self.KICK_POLICY_S,
+            roulade_duration=self.ROLL_POLICY_S,
             new_cmd_obs=True,
         )
         self.reset()
@@ -121,11 +123,6 @@ class _UpstreamMicroduckRuntime:
         policy.update_behavior(self.CONTROL_DT_S)
         action = policy.infer()
         policy.apply_action(action)
-        for _ in range(self.CONTROL_DECIMATION):
-            mujoco.mj_step(model, data)
-
-    def _step_physics_only(self) -> None:
-        mujoco, model, data, _ = self._require_started()
         for _ in range(self.CONTROL_DECIMATION):
             mujoco.mj_step(model, data)
 
@@ -201,48 +198,28 @@ class _UpstreamMicroduckRuntime:
         self._set_policy("standing")
         return self.observe()
 
-    def kick(self, *, foot: str) -> dict[str, Any]:
-        if foot not in {"left", "right"}:
-            raise ValueError("Microduck kick foot must be 'left' or 'right'")
+    def _run_behavior(self, behavior: str) -> dict[str, Any]:
         _, _, _, policy = self._require_started()
-        behavior = f"kick_{foot}"
         if behavior not in policy.behavior_sessions:
-            raise RuntimeError(f"Microduck {foot} kick policy is not configured")
+            raise RuntimeError(f"Microduck {behavior} policy is not configured")
         self._set_policy("walking")
         policy.trigger_behavior(behavior)
         while policy.behavior_mode is not None:
             self._step_policy_once()
         self._set_policy("standing")
-        self._run_steps(math.ceil(self.POST_KICK_SETTLE_S / self.CONTROL_DT_S))
-        state = self.observe()
+        self._run_steps(math.ceil(self.POST_BEHAVIOR_SETTLE_S / self.CONTROL_DT_S))
+        return self.observe()
+
+    def kick(self, *, foot: str) -> dict[str, Any]:
+        if foot not in {"left", "right"}:
+            raise ValueError("Microduck kick foot must be 'left' or 'right'")
+        state = self._run_behavior(f"kick_{foot}")
         state["foot"] = foot
         return state
 
-    def recover(self) -> dict[str, Any]:
-        _, _, _, policy = self._require_started()
-
-        # Match the current Microduck browser/runtime recovery envelope: a short
-        # settle, then the stand/get-up policy with all commands zeroed, requiring
-        # one continuous second upright before reporting success and giving up
-        # after six seconds of policy attempts.
-        for _ in range(self.RECOVERY_SETTLE_STEPS):
-            self._step_physics_only()
-        policy.last_action[:] = 0.0
-        self._set_policy("standing")
-
-        upright_steps = 0
-        attempted = 0
-        for attempted in range(1, self.RECOVERY_MAX_STEPS + 1):
-            self._step_policy_once()
-            gravity_z = float(policy.get_projected_gravity()[2])
-            upright_steps = upright_steps + 1 if gravity_z < self.UPRIGHT_GRAVITY_Z else 0
-            if upright_steps >= self.RECOVERY_UPRIGHT_STEPS:
-                state = self.observe()
-                state.update({"recovered": True, "recovery_steps": attempted})
-                return state
-
-        state = self.observe()
-        state.update({"recovered": False, "recovery_steps": attempted})
+    def roll(self) -> dict[str, Any]:
+        state = self._run_behavior("roulade")
+        state["upright"] = state["projected_gravity"][2] < self.UPRIGHT_GRAVITY_Z
         return state
 
 
@@ -260,6 +237,7 @@ class MicroduckMuJoCo(Embodiment):
         standing_policy_path: str | Path,
         kick_left_policy_path: str | Path | None = None,
         kick_right_policy_path: str | Path | None = None,
+        roll_policy_path: str | Path | None = None,
         scene_path: str | Path | None = None,
         runtime_factory: Callable[[], Any] | None = None,
     ) -> None:
@@ -269,6 +247,7 @@ class MicroduckMuJoCo(Embodiment):
         self.standing_policy_path = str(standing_policy_path)
         self.kick_left_policy_path = str(kick_left_policy_path) if kick_left_policy_path else None
         self.kick_right_policy_path = str(kick_right_policy_path) if kick_right_policy_path else None
+        self.roll_policy_path = str(roll_policy_path) if roll_policy_path else None
         self.scene_path = str(scene_path) if scene_path else None
         self._runtime_factory = runtime_factory
         self._runtime: Any | None = None
@@ -276,9 +255,11 @@ class MicroduckMuJoCo(Embodiment):
 
     @property
     def capabilities(self) -> frozenset[Capability]:
-        caps = {Capability.OBSERVE, Capability.STAND, Capability.WALK, Capability.RECOVER}
+        caps = {Capability.OBSERVE, Capability.STAND, Capability.WALK}
         if self.kick_left_policy_path and self.kick_right_policy_path:
             caps.add(Capability.KICK)
+        if self.roll_policy_path:
+            caps.add(Capability.ROLL)
         return frozenset(caps)
 
     def _build_runtime(self) -> Any:
@@ -290,6 +271,7 @@ class MicroduckMuJoCo(Embodiment):
             standing_policy_path=self.standing_policy_path,
             kick_left_policy_path=self.kick_left_policy_path,
             kick_right_policy_path=self.kick_right_policy_path,
+            roll_policy_path=self.roll_policy_path,
             scene_path=self.scene_path,
         )
 
@@ -334,10 +316,9 @@ class MicroduckMuJoCo(Embodiment):
         if skill == "kick":
             state = runtime.kick(**params)
             return SkillResult(self.name, skill, True, "Microduck kick policy executed.", dict(state))
-        if skill == "recover":
-            state = runtime.recover()
-            ok = bool(state.get("recovered", False))
-            detail = "Microduck recovered to an upright pose." if ok else "Microduck recovery policy timed out."
-            return SkillResult(self.name, skill, ok, detail, dict(state))
+        if skill == "roll":
+            state = runtime.roll()
+            ok = bool(state.get("upright", True))
+            return SkillResult(self.name, skill, ok, "Microduck roll policy executed.", dict(state))
 
         return SkillResult(self.name, skill, False, f"Unsupported Microduck skill: {skill}")
