@@ -60,7 +60,7 @@ The model is run through the real `MCPAgentRunner` and in-memory MCP v2 server. 
 
 ### AgentModel metrics
 
-`tool_selection_accuracy` is the position-wise accuracy of semantic MCP tool choices against the five expected actions.
+`tool_selection_accuracy` is the position-wise accuracy of semantic MCP tool choices against the expected actions.
 
 `argument_accuracy` is the fraction of expected actions where the selected tool is correct and all task-relevant expected arguments match. Safe optional tool arguments/defaults are allowed. Numeric values use a small configurable tolerance.
 
@@ -68,7 +68,7 @@ The model is run through the real `MCPAgentRunner` and in-memory MCP v2 server. 
 
 `arguments_exact_match_rate` is the fraction of cases where all expected actions have correct task-relevant arguments and there are no extra actions.
 
-`tool_execution_success_rate` measures whether the selected semantic actions mechanically executed in the current robot environment. This can remain high even when the model navigates to the wrong in-bounds coordinate, which is why argument accuracy is scored separately.
+`tool_execution_success_rate` measures whether the selected semantic actions mechanically executed in the current robot environment. This can remain high even when the model navigates to the wrong in-bounds coordinate—or chooses a different compatible embodiment—which is why selection and argument accuracy are scored separately.
 
 `runner_finish_rate` measures whether the model eventually returned a finish decision. This is not a task-success metric: a model that immediately says "done" can score 1.0 here and still score 0.0 strict task success.
 
@@ -85,6 +85,30 @@ The test suite includes adversarial models to verify that the metrics do not col
 - an immediate-finish model gets runner completion but zero strict task success;
 - a model choosing the right robots with one wrong target coordinate keeps perfect tool selection but loses argument accuracy and strict success;
 - a model that performs the entire correct sequence plus an unnecessary extra action keeps tool execution success but loses exact-match/strict success and action efficiency.
+
+## Four-embodiment capability selection
+
+`four_embodiment.py` extends the scripted AgentModel benchmark to every current embodiment:
+
+```bash
+python -m embodied_agent.evals.four_embodiment
+```
+
+It covers seven cases:
+
+1. Crazyflie takeoff → waypoint → land;
+2. XLeRobot navigation;
+3. LeRobot Humanoid stand;
+4. LeRobot Humanoid bounded walking;
+5. Microduck right-foot kick;
+6. Microduck learned roll;
+7. one mission coordinating all four embodiments in sequence.
+
+This benchmark deliberately includes an ambiguity that does not exist in the original three-robot suite: **Humanoid and Microduck both advertise `STAND` and `WALK`**. A model can therefore call `microduck.stand` for a request that explicitly asks for the humanoid, receive a successful robot result, and still have chosen the wrong embodiment.
+
+The `SharedCapabilityConfusionModel` sanity check does exactly that. It routes Humanoid stand/walk requests to the corresponding valid Microduck tools. `tool_execution_success_rate` remains 1.0, while tool-selection accuracy, exact-match rate, and strict task success fall. This proves the benchmark scores embodiment identity independently from mechanical tool validity.
+
+The benchmark remains dependency-free and uses the same `evaluate_agent_model` scorer and MCP runtime as the existing suites. Microduck's learned-policy physics is validated separately by the pinned `microduck-physics` gate; this layer isolates high-level selection before introducing four simultaneous physics backends.
 
 ## Physics-backed AgentModel comparison
 
@@ -144,6 +168,7 @@ Selected records can be checked into `eval_results/` for long-term model compari
 
 - run and version the first live LLM physics result, then compare models over time;
 - add broader perception-update and stale-plan tests where the target changes after an early action;
+- extend four-embodiment selection to a live model and, later, a combined real-simulator gate;
 - add single-robot skill reliability and latency metrics;
 - add bounded recovery tasks where the first tool call fails;
 - add simulator reproducibility metrics;
