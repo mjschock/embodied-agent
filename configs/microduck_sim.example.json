@@ -7,7 +7,8 @@
         "walking_policy_path": "/path/to/BEST_alpha_walking.onnx",
         "standing_policy_path": "/path/to/BEST_alpha_stand.onnx",
         "kick_left_policy_path": "/path/to/ball_kick_left.onnx",
-        "kick_right_policy_path": "/path/to/ball_kick_right.onnx"
+        "kick_right_policy_path": "/path/to/ball_kick_right.onnx",
+        "roll_policy_path": "/path/to/roulade.onnx"
       },
       "tools": [
         "observe",
@@ -15,7 +16,7 @@
         "stand",
         "walk_velocity",
         "kick",
-        "recover"
+        "roll"
       ]
     }
   }
