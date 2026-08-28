@@ -59,6 +59,8 @@ jobs:
         id: benchmark
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL_ID: ${{ inputs.model }}
+          MAX_STEPS: ${{ inputs.max_steps }}
           PYBULLET_EGL: "0"
           XLEROBOT_UPSTREAM_ROOT: ${{ github.workspace }}/.vendor/XLeRobot
           LEROBOT_HUMANOID_RUNTIME_ROOT: ${{ github.workspace }}/.vendor/lerobot-humanoid-runtime
@@ -66,8 +68,8 @@ jobs:
           mkdir -p benchmark-results
           set +e
           embodied-agent-eval-openai-physics \
-            --model "${{ inputs.model }}" \
-            --max-steps "${{ inputs.max_steps }}" \
+            --model "$MODEL_ID" \
+            --max-steps "$MAX_STEPS" \
             --output benchmark-results/openai-physics.json \
             | tee benchmark-results/stdout.json
           status=${PIPESTATUS[0]}
