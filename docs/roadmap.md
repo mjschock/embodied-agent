@@ -67,7 +67,8 @@
 - [x] Add four-embodiment capability-selection benchmark including Microduck
 - [x] Add live AgentModel command for four-embodiment selection
 - [ ] Record/version first live four-embodiment AgentModel result
-- [ ] Add combined four-embodiment real-simulator gate
+- [x] Add combined four-embodiment real-simulator gate
+- [ ] Add live four-embodiment physics comparison command/result record
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
