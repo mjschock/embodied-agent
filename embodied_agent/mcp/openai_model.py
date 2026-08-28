@@ -57,7 +57,13 @@ class OpenAIAgentModel:
             raise ValueError("max_output_tokens must be >= 64")
 
         if client is None:
-            from openai import AsyncOpenAI
+            try:
+                from openai import AsyncOpenAI
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "OpenAI agent support is optional; install with "
+                    "`pip install -e '.[openai-agent]'`"
+                ) from exc
 
             client = AsyncOpenAI()
 
