@@ -13,18 +13,12 @@ from embodied_agent.world import WorldState
 from .multi_robot import EvalSuiteResult, default_multi_robot_cases, evaluate_cases
 
 
-async def run_physics_baseline(
+def build_physics_stack(
     *,
     xlerobot_runtime_root: str | Path,
     humanoid_runtime_root: str | Path,
-) -> EvalSuiteResult:
-    """Run the standard three-robot benchmark against real simulator adapters.
-
-    This uses the same task cases and deterministic capability planner as the
-    dependency-free baseline, but swaps the scripted embodiments for upstream
-    PyBullet/MuJoCo runtimes.
-    """
-
+) -> tuple[RobotRegistry, RobotToolRouter]:
+    """Build the shared three-robot stack used by physics-backed evals."""
     registry = RobotRegistry()
     registry.register(
         XLeRobotMuJoCo(
@@ -61,6 +55,25 @@ async def run_physics_baseline(
             "crazyflie": ["takeoff", "goto", "land"],
             "humanoid": ["stand"],
         },
+    )
+    return registry, router
+
+
+async def run_physics_baseline(
+    *,
+    xlerobot_runtime_root: str | Path,
+    humanoid_runtime_root: str | Path,
+) -> EvalSuiteResult:
+    """Run the standard three-robot benchmark against real simulator adapters.
+
+    This uses the same task cases and deterministic capability planner as the
+    dependency-free baseline, but swaps the scripted embodiments for upstream
+    PyBullet/MuJoCo runtimes.
+    """
+
+    registry, router = build_physics_stack(
+        xlerobot_runtime_root=xlerobot_runtime_root,
+        humanoid_runtime_root=humanoid_runtime_root,
     )
 
     connected = []
