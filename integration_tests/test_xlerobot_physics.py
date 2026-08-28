@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import unittest
 
 from embodied_agent.core import Capability
 from embodied_agent.embodiments import XLeRobotMuJoCo
+from embodied_agent.evals.skill_metrics import SkillProbe, benchmark_robot_skills
 
 
 class XLeRobotPhysicsIntegrationTests(unittest.TestCase):
@@ -67,6 +69,70 @@ class XLeRobotPhysicsIntegrationTests(unittest.TestCase):
                 )
             finally:
                 await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_navigation_reliability_from_identical_reset_state(self) -> None:
+        async def scenario() -> None:
+            runtime_root = os.environ.get("XLEROBOT_UPSTREAM_ROOT")
+            self.assertTrue(runtime_root, "XLEROBOT_UPSTREAM_ROOT must point to the pinned upstream checkout")
+
+            robot = XLeRobotMuJoCo(
+                runtime_root=runtime_root,
+                position_tolerance_m=0.04,
+                yaw_tolerance_rad=0.06,
+            )
+
+            async def reset_to_origin(robot, probe, attempt) -> None:
+                reset = await robot.execute("reset")
+                if not reset.ok:
+                    raise RuntimeError(reset.detail)
+                if (
+                    abs(float(reset.data["x_m"])) > 1e-6
+                    or abs(float(reset.data["y_m"])) > 1e-6
+                    or abs(float(reset.data["yaw_rad"])) > 1e-6
+                ):
+                    raise RuntimeError(
+                        f"XLeRobot reset did not restore origin before attempt {attempt}"
+                    )
+
+            result = await benchmark_robot_skills(
+                robot,
+                (
+                    SkillProbe(
+                        "navigate_to",
+                        {
+                            "x_m": 0.10,
+                            "y_m": -0.06,
+                            "yaw_rad": 0.12,
+                            "max_duration_s": 4.0,
+                        },
+                        attempts=3,
+                        label="navigate-short-pose",
+                    ),
+                ),
+                before_attempt=reset_to_origin,
+            )
+
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+
+            self.assertEqual(result.robot, "xlerobot")
+            self.assertEqual(result.backend, "xlerobot-mujoco")
+            self.assertEqual(result.attempt_count, 3)
+            self.assertEqual(result.success_count, 3)
+            self.assertEqual(result.success_rate, 1.0)
+
+            metric = result.metrics[0]
+            self.assertEqual(metric.label, "navigate-short-pose")
+            self.assertEqual(metric.attempts, 3)
+            self.assertEqual(metric.successes, 3)
+            self.assertEqual(metric.success_rate, 1.0)
+            self.assertGreater(metric.mean_latency_ms, 0.0)
+            self.assertGreaterEqual(metric.p95_latency_ms, metric.p50_latency_ms)
+            self.assertGreaterEqual(metric.max_latency_ms, metric.p95_latency_ms)
+            self.assertIsNotNone(metric.successful_mean_latency_ms)
+            self.assertTrue(all(sample.ok for sample in metric.samples))
+            self.assertTrue(all(sample.error == "" for sample in metric.samples))
 
         asyncio.run(scenario())
 
