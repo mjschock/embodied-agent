@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from statistics import fmean
 from typing import Any
@@ -10,6 +10,7 @@ from typing import Any
 from embodied_agent.core import Embodiment
 
 Clock = Callable[[], float]
+AttemptHook = Callable[[Embodiment, "SkillProbe", int], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,10 +129,15 @@ async def _measure_probe(
     probe: SkillProbe,
     *,
     clock: Clock,
+    before_attempt: AttemptHook | None,
+    after_attempt: AttemptHook | None,
 ) -> SkillMetricResult:
     samples: list[SkillAttemptResult] = []
 
     for attempt in range(1, probe.attempts + 1):
+        if before_attempt is not None:
+            await before_attempt(robot, probe, attempt)
+
         started = clock()
         result = None
         error = ""
@@ -139,7 +145,11 @@ async def _measure_probe(
             result = await robot.execute(probe.skill, **dict(probe.arguments))
         except Exception as exc:  # measurement boundary: exceptions are failed attempts
             error = f"{type(exc).__name__}: {exc}"
-        finished = clock()
+        finally:
+            finished = clock()
+            if after_attempt is not None:
+                await after_attempt(robot, probe, attempt)
+
         latency_ms = (finished - started) * 1000.0
         if latency_ms < 0:
             raise ValueError("clock moved backwards while measuring skill latency")
@@ -181,6 +191,8 @@ async def benchmark_robot_skills(
     *,
     manage_connection: bool = True,
     clock: Clock = time.perf_counter,
+    before_attempt: AttemptHook | None = None,
+    after_attempt: AttemptHook | None = None,
 ) -> SkillBenchmarkResult:
     """Measure semantic-skill reliability and latency for one embodiment.
 
@@ -189,6 +201,13 @@ async def benchmark_robot_skills(
     ``SkillResult`` values and raised exceptions both count as failed attempts;
     latency includes all attempts so timeouts remain visible instead of being
     silently removed from timing statistics.
+
+    ``before_attempt`` and ``after_attempt`` are optional state-conditioning
+    hooks for skills such as navigation or flight. They run outside the measured
+    interval, so reset/setup/cleanup time does not contaminate semantic-skill
+    latency. Hook failures abort the benchmark because the requested test
+    precondition or cleanup was not established; they are not scored as robot
+    skill failures.
     """
     selected = tuple(probes)
     if not selected:
@@ -201,7 +220,15 @@ async def benchmark_robot_skills(
             await robot.connect()
             connected_here = True
         for probe in selected:
-            metrics.append(await _measure_probe(robot, probe, clock=clock))
+            metrics.append(
+                await _measure_probe(
+                    robot,
+                    probe,
+                    clock=clock,
+                    before_attempt=before_attempt,
+                    after_attempt=after_attempt,
+                )
+            )
     finally:
         if connected_here:
             await robot.disconnect()

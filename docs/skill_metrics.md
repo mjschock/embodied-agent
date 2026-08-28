@@ -29,6 +29,27 @@ result = await benchmark_robot_skills(
 
 The benchmark can own `connect()` / `disconnect()` or reuse a caller-owned connection with `manage_connection=False`.
 
+## State-conditioned probes
+
+Stateful skills such as navigation and flight need comparable start conditions before every measured attempt. Otherwise attempt 1 can do real work while later attempts begin already at the destination.
+
+`benchmark_robot_skills` therefore accepts optional async `before_attempt` and `after_attempt` hooks. Each receives `(robot, probe, attempt_number)` and runs **outside** the measured interval. This makes it possible to reset or reposition an embodiment without contaminating the semantic skill latency:
+
+```python
+async def reset_before_attempt(robot, probe, attempt):
+    result = await robot.execute("reset")
+    if not result.ok:
+        raise RuntimeError(result.detail)
+
+result = await benchmark_robot_skills(
+    robot,
+    [SkillProbe("navigate_to", {"x_m": 1.0, "y_m": 0.0}, attempts=5)],
+    before_attempt=reset_before_attempt,
+)
+```
+
+A setup or cleanup hook failure aborts the benchmark because the requested test condition was not established. It is **not** scored as a failure of the measured robot skill. By contrast, an exception raised by the measured skill itself is captured as a failed attempt, and `after_attempt` is still run.
+
 ## Per-skill metrics
 
 Each probe reports:
