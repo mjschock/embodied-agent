@@ -12,6 +12,8 @@ class Capability(StrEnum):
     FLY = "fly"
     WALK = "walk"
     STAND = "stand"
+    KICK = "kick"
+    RECOVER = "recover"
 
 
 @dataclass(frozen=True, slots=True)
