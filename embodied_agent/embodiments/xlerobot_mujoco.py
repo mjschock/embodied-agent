@@ -30,6 +30,10 @@ class XLeRobotMuJoCo(Embodiment):
         yaw_tolerance_rad: float = 0.05,
         navigation_kp_linear: float = 2.0,
         navigation_kp_yaw: float = 3.0,
+        navigation_default_timeout_s: float = 10.0,
+        navigation_max_timeout_s: float = 30.0,
+        navigation_timeout_safety_factor: float = 1.75,
+        navigation_timeout_settle_s: float = 1.0,
         sim_factory: Callable[[Path], Any] | None = None,
     ) -> None:
         self.name = name
@@ -43,6 +47,20 @@ class XLeRobotMuJoCo(Embodiment):
         self.yaw_tolerance_rad = float(yaw_tolerance_rad)
         self.navigation_kp_linear = float(navigation_kp_linear)
         self.navigation_kp_yaw = float(navigation_kp_yaw)
+        self.navigation_default_timeout_s = float(navigation_default_timeout_s)
+        self.navigation_max_timeout_s = float(navigation_max_timeout_s)
+        self.navigation_timeout_safety_factor = float(navigation_timeout_safety_factor)
+        self.navigation_timeout_settle_s = float(navigation_timeout_settle_s)
+        if self.navigation_default_timeout_s <= 0.0:
+            raise ValueError("navigation_default_timeout_s must be positive")
+        if self.navigation_max_timeout_s < self.navigation_default_timeout_s:
+            raise ValueError(
+                "navigation_max_timeout_s must be >= navigation_default_timeout_s"
+            )
+        if self.navigation_timeout_safety_factor < 1.0:
+            raise ValueError("navigation_timeout_safety_factor must be >= 1.0")
+        if self.navigation_timeout_settle_s < 0.0:
+            raise ValueError("navigation_timeout_settle_s must be non-negative")
         self._sim_factory = sim_factory
         self._sim: Any | None = None
 
@@ -123,10 +141,21 @@ class XLeRobotMuJoCo(Embodiment):
             x_m = float(request.params["x_m"])
             y_m = float(request.params["y_m"])
             yaw_rad = float(request.params.get("yaw_rad", 0.0))
-            max_duration_s = float(request.params.get("max_duration_s", 10.0))
-            if max_duration_s <= 0.0 or max_duration_s > 30.0:
-                raise ValueError("max_duration_s must be > 0 and <= 30.0")
-            return await self._navigate_to(x_m, y_m, yaw_rad, max_duration_s)
+            explicit_duration = request.params.get("max_duration_s")
+            if explicit_duration is None:
+                max_duration_s = self._resolve_navigation_timeout_s(x_m, y_m, yaw_rad)
+                timeout_source = "distance-aware"
+            else:
+                max_duration_s = float(explicit_duration)
+                self._validate_navigation_timeout(max_duration_s)
+                timeout_source = "explicit"
+            return await self._navigate_to(
+                x_m,
+                y_m,
+                yaw_rad,
+                max_duration_s,
+                timeout_source,
+            )
 
         raise ValueError(f"Unsupported XLeRobot MuJoCo skill: {request.name}")
 
@@ -148,7 +177,12 @@ class XLeRobotMuJoCo(Embodiment):
             sim.zero_base_velocity()
 
     async def _navigate_to(
-        self, target_x: float, target_y: float, target_yaw: float, max_duration_s: float
+        self,
+        target_x: float,
+        target_y: float,
+        target_yaw: float,
+        max_duration_s: float,
+        timeout_source: str,
     ) -> SkillResult:
         sim = self._require_sim()
         max_steps = max(1, math.ceil(max_duration_s / sim.timestep_s))
@@ -172,6 +206,8 @@ class XLeRobotMuJoCo(Embodiment):
                             **self._pose_data(state),
                             "position_error_m": position_error,
                             "yaw_error_rad": yaw_error,
+                            "max_duration_s": max_duration_s,
+                            "timeout_source": timeout_source,
                         },
                     )
 
@@ -213,8 +249,50 @@ class XLeRobotMuJoCo(Embodiment):
                 **self._pose_data(state),
                 "position_error_m": math.hypot(dx, dy),
                 "yaw_error_rad": yaw_error,
+                "max_duration_s": max_duration_s,
+                "timeout_source": timeout_source,
             },
         )
+
+    def _resolve_navigation_timeout_s(
+        self,
+        target_x: float,
+        target_y: float,
+        target_yaw: float,
+    ) -> float:
+        state = self._state()
+        distance_m = math.hypot(target_x - state["x_m"], target_y - state["y_m"])
+        yaw_distance_rad = abs(_wrap_angle(target_yaw - state["yaw_rad"]))
+
+        positive_linear_limits = [
+            limit for limit in (self.max_linear_x_mps, self.max_linear_y_mps) if limit > 0.0
+        ]
+        if not positive_linear_limits:
+            raise ValueError("XLeRobot navigation requires a positive linear speed limit")
+        conservative_linear_speed_mps = min(positive_linear_limits)
+        linear_lower_bound_s = distance_m / conservative_linear_speed_mps
+
+        if self.max_yaw_rate_rps > 0.0:
+            yaw_lower_bound_s = yaw_distance_rad / self.max_yaw_rate_rps
+        elif yaw_distance_rad <= self.yaw_tolerance_rad:
+            yaw_lower_bound_s = 0.0
+        else:
+            raise ValueError("XLeRobot navigation requires a positive yaw-rate limit")
+
+        ideal_lower_bound_s = max(linear_lower_bound_s, yaw_lower_bound_s)
+        timeout_s = max(
+            self.navigation_default_timeout_s,
+            self.navigation_timeout_safety_factor * ideal_lower_bound_s
+            + self.navigation_timeout_settle_s,
+        )
+        return min(timeout_s, self.navigation_max_timeout_s)
+
+    def _validate_navigation_timeout(self, max_duration_s: float) -> None:
+        if max_duration_s <= 0.0 or max_duration_s > self.navigation_max_timeout_s:
+            raise ValueError(
+                "max_duration_s must be > 0 and <= "
+                f"{self.navigation_max_timeout_s:.2f}"
+            )
 
     def _validate_velocity_command(
         self, lin_x: float, lin_y: float, yaw_rate: float, duration_s: float
