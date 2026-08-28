@@ -22,6 +22,7 @@ class ParamRule:
     default: Any = None
     minimum: float | None = None
     maximum: float | None = None
+    choices: tuple[str, ...] | None = None
 
     def normalize(self, name: str, value: Any) -> Any:
         if self.kind == "number":
@@ -38,6 +39,11 @@ class ParamRule:
         if self.kind == "string":
             if not isinstance(value, str) or not value.strip():
                 raise ToolValidationError(f"{name} must be a non-empty string")
+            value = value.strip()
+            if self.choices is not None and value not in self.choices:
+                raise ToolValidationError(
+                    f"{name} must be one of: {', '.join(self.choices)}"
+                )
             return value
         raise ToolValidationError(f"unsupported parameter kind for {name}: {self.kind}")
 
@@ -47,6 +53,8 @@ class ParamRule:
             schema["minimum"] = self.minimum
         if self.maximum is not None:
             schema["maximum"] = self.maximum
+        if self.choices is not None:
+            schema["enum"] = list(self.choices)
         if not self.required and self.default is not None:
             schema["default"] = self.default
         return schema
@@ -99,8 +107,6 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
             "x_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "y_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "z_m": _NUMBER(minimum=0.03, maximum=3.0),
-            # Omission is meaningful: the robot adapter derives a distance-aware
-            # safe timeout from its actual simulator/runtime speed envelope.
             "timeout_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
         },
     ),
@@ -126,8 +132,6 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
             "x_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "y_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "yaw_rad": _NUMBER(required=False, default=0.0, minimum=-math.tau, maximum=math.tau),
-            # As with drone goto, omission lets the adapter derive a bounded
-            # duration from the requested transit and configured speed envelope.
             "max_duration_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
         },
     ),
@@ -142,6 +146,12 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
             "duration_s": _NUMBER(required=False, default=1.0, minimum=0.01, maximum=5.0),
         },
     ),
+    "kick": SkillToolSpec(
+        "kick",
+        Capability.KICK,
+        {"foot": ParamRule(kind="string", choices=("left", "right"))},
+    ),
+    "roll": SkillToolSpec("roll", Capability.ROLL),
 }
 
 

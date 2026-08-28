@@ -1,0 +1,45 @@
+name: microduck-physics
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  microduck-physics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: pollen-robotics/microduck_rl
+          ref: d424a0c899f6b33cbd3daeb279913134349c0b63
+          path: .vendor/microduck_rl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - name: Install Microduck simulator runtime
+        run: pip install -e ".[microduck-sim]"
+      - name: Download pinned Microduck policies
+        run: |
+          mkdir -p .vendor/microduck-policies
+          base="https://huggingface.co/spaces/pollen-robotics/microduck-simulator/resolve/836975ab63058b2235fe23878bb86a3e2eee7089/app/public/policies"
+          for policy in \
+            BEST_alpha_walking.onnx \
+            BEST_alpha_stand.onnx \
+            ball_kick_left.onnx \
+            ball_kick_right.onnx \
+            roulade.onnx
+          do
+            curl -L --fail --retry 3 --retry-all-errors \
+              -o ".vendor/microduck-policies/$policy" \
+              "$base/$policy?download=true"
+          done
+      - name: Run headless Microduck MuJoCo policy smoke
+        env:
+          MICRODUCK_RL_ROOT: ${{ github.workspace }}/.vendor/microduck_rl
+          MICRODUCK_POLICY_DIR: ${{ github.workspace }}/.vendor/microduck-policies
+        run: python -m unittest discover -s integration_tests -p "test_microduck_physics.py" -v

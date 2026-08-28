@@ -17,6 +17,8 @@
 - [x] Add upstream XLeRobot MuJoCo base-navigation adapter
 - [x] Smoke-test XLeRobot adapter against a local upstream checkout
 - [ ] Attach XLeRobot arm/VLA policy before enabling `MANIPULATE`
+- [x] Add policy-backed Microduck MuJoCo adapter with stand/walk/kick/roll skills
+- [x] Smoke-test Microduck against pinned native runtime + official Space policies
 - [ ] Normalize observations
 - [ ] Add simulator reset/seed support
 - [ ] Record episode traces
@@ -61,6 +63,7 @@
 - [x] Run the same suite against physics-backed simulator adapters
 - [x] Add physics-backed `AgentModel` comparison harness with oracle MCP real-simulator gate
 - [x] Add live OpenAI physics comparison command
+- [ ] Add Microduck learned-policy skill eval cases for walking/kick/roll
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
@@ -71,6 +74,8 @@
 - [ ] Preserve identical high-level skill API
 - [ ] Add emergency stop / safety state
 - [ ] Compare sim vs real skill outcomes
+- [ ] Add physical Microduck backend using Pollen's onboard policy runtime
+- [ ] Compare Microduck sim vs real policy outcomes
 
 ## M5 — Mixed reality
 - [ ] Add physical Crazyflie via Bitcraze `cflib`
