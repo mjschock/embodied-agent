@@ -70,7 +70,8 @@
 - [x] Add combined four-embodiment real-simulator gate
 - [ ] Add live four-embodiment physics comparison command/result record
 - [x] Add single-robot skill success rate and latency metrics
-- [ ] Apply skill reliability metrics to pinned physics backends
+- [x] Apply skill reliability metrics to pinned Microduck backend
+- [ ] Apply skill reliability metrics to pinned Crazyflie/XLeRobot/Humanoid backends
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
 - [ ] Compare physics-backed LLM task success against deterministic orchestration
