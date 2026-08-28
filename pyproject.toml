@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 embodied-agent-mcp = "embodied_agent.mcp.__main__:main"
+embodied-agent-run = "embodied_agent.mcp.openai_cli:main"
 
 [project.optional-dependencies]
 crazyflie-sim = ["gym-pybullet-drones>=2.2,<3"]
