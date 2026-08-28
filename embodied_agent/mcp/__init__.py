@@ -1,3 +1,25 @@
+from .agent import (
+    AgentActionRecord,
+    AgentContext,
+    AgentDecision,
+    AgentDecisionKind,
+    AgentModel,
+    AgentRunResult,
+    AgentToolDescription,
+    MCPAgentRunner,
+)
 from .server import build_mcp_server, build_mcp_server_from_config, serve_stdio
 
-__all__ = ["build_mcp_server", "build_mcp_server_from_config", "serve_stdio"]
+__all__ = [
+    "AgentActionRecord",
+    "AgentContext",
+    "AgentDecision",
+    "AgentDecisionKind",
+    "AgentModel",
+    "AgentRunResult",
+    "AgentToolDescription",
+    "MCPAgentRunner",
+    "build_mcp_server",
+    "build_mcp_server_from_config",
+    "serve_stdio",
+]

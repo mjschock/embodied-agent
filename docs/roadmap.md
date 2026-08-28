@@ -30,9 +30,12 @@
 - [x] Add shared world entities and task execution state
 - [x] Add late-bound world entity references for cross-embodiment targets
 - [x] Expose read-only live world state through MCP resources
+- [x] Add provider-agnostic iterative high-level MCP agent loop
+- [x] Re-read world state before every model decision
+- [x] Bound high-level agent runs with explicit maximum-step limits
 - [ ] Add perception-to-world entity updates
 - [ ] Add bounded retries and failure recovery
-- [ ] Add an LLM planner that consumes MCP resources and tools
+- [ ] Add a real LLM `AgentModel` provider
 
 ## M3 — Evals
 - [x] Add dependency-free three-robot baseline eval suite
@@ -40,6 +43,7 @@
 - [x] Measure multi-step task completion, tool success, and execution coverage
 - [x] Verify execution failures are distinguishable from planning failures
 - [x] Use shared world entities instead of duplicated waypoint coordinates in baseline evals
+- [x] Contract-test a scripted MCP agent coordinating all three embodiments
 - [ ] Add perception-update / stale-plan world-state evals
 - [ ] Run the same suite against physics-backed simulator adapters
 - [ ] Add single-robot skill success rate and latency metrics
