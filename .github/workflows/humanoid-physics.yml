@@ -1,0 +1,31 @@
+name: humanoid-physics
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  humanoid-physics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: huggingface/lerobot-humanoid-runtime
+          ref: e4dc62795e83b2e69580cad4d3229bdb558e912e
+          path: .vendor/lerobot-humanoid-runtime
+      - uses: actions/checkout@v4
+        with:
+          repository: huggingface/lerobot-humanoid-model
+          ref: 222717c3faeef21709a578a088c267c8a5f4a4a9
+          path: .vendor/lerobot-humanoid-runtime/robot/lerobot-humanoid-model
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[humanoid-sim]"
+      - name: Run headless LeRobot Humanoid MuJoCo controller smoke
+        env:
+          LEROBOT_HUMANOID_RUNTIME_ROOT: ${{ github.workspace }}/.vendor/lerobot-humanoid-runtime
+        run: python -m unittest discover -s integration_tests -p "test_humanoid_physics.py" -v
