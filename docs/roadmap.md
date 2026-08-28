@@ -35,7 +35,10 @@
 - [x] Bound high-level agent runs with explicit maximum-step limits
 - [x] Add OpenAI Responses API `AgentModel` provider with Structured Outputs
 - [x] Add bounded OpenAI-agent CLI with explicit model selection
-- [ ] Add perception-to-world entity updates
+- [x] Add trusted perception/localization-to-world ingestion policy boundary
+- [x] Reject untrusted, low-confidence, non-world-frame, stale, and kind-changing observations
+- [x] Surface entity observation recency through shared world/MCP resources
+- [ ] Add calibrated camera/body-frame transform adapters before ingestion
 - [ ] Add bounded retries and failure recovery
 - [ ] Add at least one additional LLM provider for portability
 
@@ -51,8 +54,9 @@
 - [x] Separately score tool selection, grounded arguments, execution, finish behavior, strict task success, and action efficiency
 - [x] Add adversarial metric checks for premature finish, wrong coordinates, and unnecessary actions
 - [x] Add optional live OpenAI benchmark command against scripted robots
+- [x] Test a trusted perception correction between robot steps with late-bound downstream navigation
 - [ ] Record/version live LLM benchmark results for model comparisons
-- [ ] Add perception-update / stale-plan world-state evals
+- [ ] Add broader perception-update / stale-plan benchmark cases
 - [ ] Run the same suite against physics-backed simulator adapters
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
@@ -69,7 +73,7 @@
 - [ ] Add physical Crazyflie via Bitcraze `cflib`
 - [ ] Run physical XLeRobot + physical Crazyflie + simulated humanoid
 - [x] Establish shared world-state abstraction across embodiments
-- [ ] Feed real-robot localization/perception into shared world state
+- [ ] Feed real-robot localization/perception into shared world state through the trusted ingestor
 
 ## M6 — Humanoid
 - [ ] Track LeRobot Humanoid upper-body / whole-body progress

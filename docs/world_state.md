@@ -20,7 +20,7 @@ WorldState
     └── scout-and-approach
 ```
 
-An entity has a stable ID, semantic kind, world-frame pose, optional attributes, source, and confidence.
+An entity has a stable ID, semantic kind, pose, optional attributes, source, confidence, and optional observation timestamp.
 
 ```python
 from embodied_agent.world import Pose3D, WorldEntity, WorldState
@@ -31,11 +31,84 @@ world.upsert_entity(
         entity_id="inspection_target",
         kind="waypoint",
         pose=Pose3D(x_m=1.5, y_m=0.5, z_m=1.0),
-        source="crazyflie-perception",
-        confidence=0.92,
+        source="map-seed",
+        confidence=0.80,
+        observed_at_s=100.0,
     )
 )
 ```
+
+`observed_at_s` uses a shared time base for producers that can update the same entity. It is surfaced in `WorldEntity.to_dict()`, `WorldState.snapshot()`, and therefore MCP world resources.
+
+## Trusted perception/localization ingestion
+
+Robot sensors should not write arbitrary world entities directly from an LLM decision. `TrustedWorldIngestor` provides a separate policy boundary for grounded perception and localization pipelines.
+
+```python
+from embodied_agent.world import (
+    EntityObservation,
+    Pose3D,
+    TrustedWorldIngestor,
+)
+
+ingestor = TrustedWorldIngestor(
+    world,
+    allowed_sources={
+        "crazyflie-perception",
+        "xlerobot-localization",
+    },
+    min_confidence=0.70,
+)
+
+result = ingestor.ingest(
+    EntityObservation(
+        entity_id="inspection_target",
+        kind="waypoint",
+        pose=Pose3D(1.8, 0.6, 1.0),
+        source="crazyflie-perception",
+        observed_at_s=101.0,
+        confidence=0.94,
+    )
+)
+
+assert result.accepted
+```
+
+The default ingestion policy rejects an observation before it can mutate the world when:
+
+- the source is not allowlisted;
+- confidence is below the configured threshold;
+- the pose is not in the `world` frame;
+- its observation timestamp is stale or duplicates the currently accepted timestamp;
+- the same stable entity ID suddenly changes semantic kind.
+
+Rejected observations do not increment the world version. Accepted updates can merge existing entity attributes so perception corrections do not accidentally discard useful semantic metadata.
+
+This class is a **trusted infrastructure API**, not a generic MCP tool. The MCP host can read grounded world resources, but there is still no `world.upsert` tool for an LLM to call.
+
+## Coordinate frames
+
+`EntityFieldRef` and the default `TrustedWorldIngestor` both require world-frame coordinates for navigation-consumable state.
+
+A camera-frame or robot-body-frame detection must be transformed into the shared world frame by trusted localization/perception code before ingestion:
+
+```text
+camera detection
+      |
+      v
+calibration + localization transform
+      |
+      v
+world-frame EntityObservation
+      |
+      v
+TrustedWorldIngestor
+      |
+      v
+WorldState
+```
+
+This is deliberate. Silent frame mixing is more dangerous than forcing an explicit transform boundary.
 
 ## Late-bound references
 
@@ -65,23 +138,18 @@ That matters when perception or localization changes after planning:
 plan created
     |
     v
-inspection_target = (1.0, 2.0)
+inspection_target = (1.0, 1.0)
     |
-Crazyflie/perception correction
+Crazyflie flies toward seeded target
+    |
+trusted perception correction
     v
-inspection_target = (1.3, 2.2)
+inspection_target = (4.0, -2.0)
     |
-    +--> later Crazyflie step resolves (1.3, 2.2, z)
-    +--> later XLeRobot step resolves (1.3, 2.2)
+    +--> XLeRobot step resolves (4.0, -2.0)
 ```
 
-A stale coordinate is not embedded in the plan.
-
-## Coordinate frames
-
-`EntityFieldRef` currently resolves only poses in the `world` frame. A camera-frame detection must be transformed into the shared world frame before navigation can consume it.
-
-This is deliberate. Silent frame mixing is more dangerous than forcing an explicit transform boundary.
+A stale coordinate is not embedded in the plan. The test suite now exercises this exact handoff: Crazyflie receives the original target, its perception callback ingests a newer correction, and XLeRobot's already-created downstream step resolves the corrected pose.
 
 ## Task state
 
@@ -103,8 +171,13 @@ print(world.snapshot())
 
 World-resolution failures are recorded as task failures before a robot is called. For example, a plan referring to an unknown entity cannot accidentally degrade into a default coordinate.
 
-## Evals
+## MCP read boundary
 
-The dependency-free three-robot benchmark now uses shared world entities for its waypoints. Crazyflie and XLeRobot consume references to the same entity rather than receiving duplicate hard-coded XYZ/XY values.
+MCP exposes the current world as read-only resources:
 
-This gives future perception tests a natural next step: have the scouting embodiment update an entity pose, then measure whether downstream embodiments act on the corrected state.
+```text
+world://snapshot
+world://entities/<id>
+```
+
+Accepted perception/localization updates are immediately visible on the next resource read, including source, confidence, and observation timestamp. Robot actions remain MCP tools; grounded world mutation remains in trusted ingestion code.

@@ -44,6 +44,7 @@ class WorldEntity:
     attributes: Mapping[str, Any] = field(default_factory=dict)
     source: str = ""
     confidence: float | None = None
+    observed_at_s: float | None = None
 
     def __post_init__(self) -> None:
         if not self.entity_id.strip():
@@ -55,6 +56,11 @@ class WorldEntity:
             if not 0.0 <= confidence <= 1.0:
                 raise ValueError("confidence must be between 0 and 1")
             object.__setattr__(self, "confidence", confidence)
+        if self.observed_at_s is not None:
+            observed_at_s = float(self.observed_at_s)
+            if not math.isfinite(observed_at_s):
+                raise ValueError("observed_at_s must be finite")
+            object.__setattr__(self, "observed_at_s", observed_at_s)
         object.__setattr__(self, "attributes", dict(self.attributes))
 
     def to_dict(self) -> dict[str, Any]:
@@ -65,6 +71,7 @@ class WorldEntity:
             "attributes": dict(self.attributes),
             "source": self.source,
             "confidence": self.confidence,
+            "observed_at_s": self.observed_at_s,
         }
 
 
