@@ -110,6 +110,26 @@ The `SharedCapabilityConfusionModel` sanity check does exactly that. It routes H
 
 The benchmark remains dependency-free and uses the same `evaluate_agent_model` scorer and MCP runtime as the existing suites. Microduck's learned-policy physics is validated separately by the pinned `microduck-physics` gate; this layer isolates high-level selection before introducing four simultaneous physics backends.
 
+### Live four-embodiment OpenAI run
+
+The same seven cases can be sent to the existing OpenAI `AgentModel` provider without changing the benchmark definition:
+
+```bash
+pip install -e ".[openai-agent]"
+export OPENAI_API_KEY="..."
+
+embodied-agent-eval-openai-four \
+  --model "YOUR_MODEL_ID" \
+  --max-steps 10 \
+  --output eval_results/four-embodiment.json
+```
+
+The command emits the standard schema-versioned result-record envelope with benchmark identity `four-embodiment-selection`, provider/model identity, maximum step budget, timestamp, repository revision where detectable, Python version, and the complete seven-case metric payload.
+
+Its exit code is 0 only when `strict_task_success_rate == 1.0`; a lower score is a legitimate model-evaluation result, not evidence that the scripted robot stack or CI is broken. CI never calls the live provider: it injects `ExpectedActionModel` into the same provider-agnostic function to validate evaluator and result-record wiring without requiring an API key or incurring usage.
+
+This command makes the benchmark runnable against a live model. The roadmap keeps the **first recorded live four-embodiment result** as a separate milestone so availability of the harness is not confused with an unrun model-quality claim.
+
 ## Physics-backed AgentModel comparison
 
 `physics_agent_model.py` runs the deterministic planner and an `AgentModel` on fresh, equivalently configured physics stacks and reports both result sets plus direct score gaps. Within each path the same connected XLeRobot, Crazyflie, and humanoid instances are reused across workbench A → B → C, preserving sequential embodiment state.
@@ -124,7 +144,7 @@ Both deterministic and oracle AgentModel physics paths are required to score 1.0
 
 ## Optional live OpenAI benchmarks
 
-After installing the optional OpenAI provider and configuring an API key/model, the scripted benchmark can be run against a live OpenAI model:
+After installing the optional OpenAI provider and configuring an API key/model, the historical scripted three-robot benchmark can be run against a live OpenAI model:
 
 ```bash
 pip install -e ".[openai-agent]"
@@ -166,9 +186,9 @@ Selected records can be checked into `eval_results/` for long-term model compari
 
 ## Next eval layers
 
-- run and version the first live LLM physics result, then compare models over time;
+- run and version the first live four-embodiment result and the first live physics result, then compare models over time;
 - add broader perception-update and stale-plan tests where the target changes after an early action;
-- extend four-embodiment selection to a live model and, later, a combined real-simulator gate;
+- add a combined four-embodiment real-simulator gate;
 - add single-robot skill reliability and latency metrics;
 - add bounded recovery tasks where the first tool call fails;
 - add simulator reproducibility metrics;

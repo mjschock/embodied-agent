@@ -65,7 +65,8 @@
 - [x] Add live OpenAI physics comparison command
 - [x] Add Microduck learned-policy skill eval cases for walking/kick/roll
 - [x] Add four-embodiment capability-selection benchmark including Microduck
-- [ ] Run four-embodiment selection against a live AgentModel
+- [x] Add live AgentModel command for four-embodiment selection
+- [ ] Record/version first live four-embodiment AgentModel result
 - [ ] Add combined four-embodiment real-simulator gate
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
