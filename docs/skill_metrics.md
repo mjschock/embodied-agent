@@ -107,6 +107,26 @@ Aggregate success rate was **1.0** and aggregate mean semantic-call latency was 
 
 These numbers primarily measure the adapter/controller request-and-snapshot path in fixed-base MuJoCo. They do **not** represent human-scale standing or reset movement duration, and they do not establish learned locomotion performance because no locomotion policy is loaded in this workflow.
 
+## Pinned XLeRobot navigation sample
+
+XLeRobot navigation is stateful, so the pinned benchmark uses the state-conditioning hook to execute an unmeasured `reset` before every timed attempt. The hook also verifies that reset returned the base to `(x, y, yaw) = (0, 0, 0)` before the benchmark clock can start.
+
+The measured task is the same short pose already exercised by the upstream-backed smoke test:
+
+```text
+navigate_to(x=0.10 m, y=-0.06 m, yaw=0.12 rad, max_duration=4.0 s)
+```
+
+On the successful PR #30 validation run, all **3/3 reset-conditioned navigations succeeded**:
+
+| Probe | Success | Mean ms | p50 ms | p95 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| navigate-short-pose | 3/3 | 13.51 | 13.37 | 13.79 | 13.84 |
+
+The three raw measured samples were approximately 13.84 ms, 13.37 ms, and 13.31 ms. Reset/setup latency is deliberately excluded.
+
+These values are accelerated MuJoCo/controller compute latency for a fixed simulation task, not the elapsed duration a physical mobile base would require to drive the requested pose. The explicit 4-second value is a simulation-time safety budget, not the measured wall-clock execution time.
+
 ## Timing interpretation
 
 The CI gates deliberately enforce reliability and structural timing invariants rather than absolute millisecond ceilings, because hosted-runner performance can vary. Physics compute latency, simulated physical duration, and eventual real-hardware wall-clock duration are separate quantities and should not be conflated.
