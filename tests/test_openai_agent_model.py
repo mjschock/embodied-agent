@@ -5,6 +5,8 @@ import json
 import unittest
 from types import SimpleNamespace
 
+from openai import AsyncOpenAI
+
 from embodied_agent.mcp import (
     AgentActionRecord,
     AgentContext,
@@ -103,6 +105,10 @@ def context() -> AgentContext:
 
 
 class OpenAIAgentModelTests(unittest.TestCase):
+    def test_current_openai_sdk_exposes_async_responses_parse(self) -> None:
+        client = AsyncOpenAI(api_key="test-key")
+        self.assertTrue(callable(client.responses.parse))
+
     def test_tool_decision_is_converted_to_agent_decision(self) -> None:
         async def scenario() -> None:
             client = FakeOpenAIClient(
