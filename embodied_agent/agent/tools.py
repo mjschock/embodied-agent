@@ -107,8 +107,6 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
             "x_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "y_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "z_m": _NUMBER(minimum=0.03, maximum=3.0),
-            # Omission is meaningful: the robot adapter derives a distance-aware
-            # safe timeout from its actual simulator/runtime speed envelope.
             "timeout_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
         },
     ),
@@ -134,8 +132,6 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
             "x_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "y_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "yaw_rad": _NUMBER(required=False, default=0.0, minimum=-math.tau, maximum=math.tau),
-            # As with drone goto, omission lets the adapter derive a bounded
-            # duration from the requested transit and configured speed envelope.
             "max_duration_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
         },
     ),
@@ -155,7 +151,7 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
         Capability.KICK,
         {"foot": ParamRule(kind="string", choices=("left", "right"))},
     ),
-    "recover": SkillToolSpec("recover", Capability.RECOVER),
+    "roll": SkillToolSpec("roll", Capability.ROLL),
 }
 
 
