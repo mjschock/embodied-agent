@@ -31,7 +31,8 @@ jobs:
             BEST_alpha_walking.onnx \
             BEST_alpha_stand.onnx \
             ball_kick_left.onnx \
-            ball_kick_right.onnx
+            ball_kick_right.onnx \
+            roulade.onnx
           do
             curl -L --fail --retry 3 --retry-all-errors \
               -o ".vendor/microduck-policies/$policy" \
