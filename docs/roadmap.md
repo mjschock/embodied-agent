@@ -71,7 +71,9 @@
 - [ ] Add live four-embodiment physics comparison command/result record
 - [x] Add single-robot skill success rate and latency metrics
 - [x] Apply skill reliability metrics to pinned Microduck backend
-- [ ] Apply skill reliability metrics to pinned Crazyflie/XLeRobot/Humanoid backends
+- [x] Apply skill reliability metrics to pinned LeRobot Humanoid stand/reset backend
+- [ ] Apply skill reliability metrics to pinned Crazyflie/XLeRobot backends
+- [ ] Measure Humanoid learned-walking reliability when a pinned policy is provisioned in CI
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
 - [ ] Compare physics-backed LLM task success against deterministic orchestration

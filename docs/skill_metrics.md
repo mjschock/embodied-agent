@@ -71,7 +71,24 @@ Aggregate success rate was **1.0** and aggregate mean wall-clock latency was **2
 
 These latency numbers are **accelerated-simulation compute time, not physical action duration**. For example, the kick policy represents roughly 0.5 seconds of simulated behavior and roll may cover up to 3 seconds of simulated behavior, yet MuJoCo/ONNX executes those simulated control steps faster than real time on the CI CPU. The values are useful for tracking simulator/runtime regressions on comparable runners, not for claiming how long a physical Microduck would take to move.
 
-The CI gate deliberately enforces reliability and structural timing invariants rather than absolute millisecond ceilings, because hosted-runner performance can vary.
+## Pinned LeRobot Humanoid sample
+
+The pinned `humanoid-physics` workflow does not configure a locomotion policy and explicitly verifies that `Capability.WALK` is unavailable. Its reliability sample therefore measures only the semantic operations genuinely supported by that environment: five `stand` calls and three safe simulator `reset` calls.
+
+The controller thread is allowed to warm up before timing, and the benchmark reuses one connection so startup/checkout cost is excluded. On the successful PR #28 validation run, all **8/8 semantic attempts succeeded**:
+
+| Probe | Success | Mean ms | p50 ms | p95 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| stand | 5/5 | 0.233 | 0.208 | 0.334 | 0.362 |
+| reset | 3/3 | 0.318 | 0.303 | 0.358 | 0.365 |
+
+Aggregate success rate was **1.0** and aggregate mean semantic-call latency was **0.265 ms** across 8 attempts.
+
+These numbers primarily measure the adapter/controller request-and-snapshot path in fixed-base MuJoCo. They do **not** represent human-scale standing or reset movement duration, and they do not establish learned locomotion performance because no locomotion policy is loaded in this workflow.
+
+## Timing interpretation
+
+The CI gates deliberately enforce reliability and structural timing invariants rather than absolute millisecond ceilings, because hosted-runner performance can vary. Physics compute latency, simulated physical duration, and eventual real-hardware wall-clock duration are separate quantities and should not be conflated.
 
 ## Applying this to physics and hardware
 
