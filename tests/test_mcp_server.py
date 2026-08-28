@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 
 from mcp import Client
@@ -15,6 +16,7 @@ from embodied_agent.core import (
     SkillResult,
 )
 from embodied_agent.mcp import build_mcp_server
+from embodied_agent.world import Pose3D, WorldEntity, WorldState
 
 
 class FakeRobot(Embodiment):
@@ -73,13 +75,23 @@ def make_server(*, fail_skill: str | None = None):
         registry,
         {"crazyflie": ["observe", "takeoff", "goto", "land", "raw_motor_command"]},
     )
-    return build_mcp_server(router, registry=registry), router, drone
+    world = WorldState()
+    world.upsert_entity(
+        WorldEntity(
+            "inspection target",
+            "waypoint",
+            Pose3D(1.0, 2.0, 0.5),
+            source="test",
+            confidence=0.9,
+        )
+    )
+    return build_mcp_server(router, registry=registry, world=world), router, drone, world
 
 
 class MCPServerTests(unittest.TestCase):
     def test_lists_only_safe_capability_supported_tools_with_exact_schema(self) -> None:
         async def scenario() -> None:
-            server, router, _ = make_server()
+            server, router, _, _ = make_server()
             async with Client(server) as client:
                 result = await client.list_tools()
                 by_name = {tool.name: tool for tool in result.tools}
@@ -105,7 +117,7 @@ class MCPServerTests(unittest.TestCase):
 
     def test_mcp_lifespan_connects_and_disconnects_robot(self) -> None:
         async def scenario() -> None:
-            server, _, drone = make_server()
+            server, _, drone, _ = make_server()
             self.assertFalse(drone.connected)
             async with Client(server) as client:
                 self.assertTrue(drone.connected)
@@ -120,7 +132,7 @@ class MCPServerTests(unittest.TestCase):
 
     def test_sdk_schema_validation_blocks_bad_arguments_before_robot(self) -> None:
         async def scenario() -> None:
-            server, _, drone = make_server()
+            server, _, drone, _ = make_server()
             async with Client(server) as client:
                 result = await client.call_tool("crazyflie.takeoff", {"altitude_m": 99.0})
                 self.assertTrue(result.is_error)
@@ -130,13 +142,71 @@ class MCPServerTests(unittest.TestCase):
 
     def test_robot_execution_failure_is_an_mcp_tool_error_not_planning_error(self) -> None:
         async def scenario() -> None:
-            server, _, drone = make_server(fail_skill="takeoff")
+            server, _, drone, _ = make_server(fail_skill="takeoff")
             async with Client(server) as client:
                 result = await client.call_tool("crazyflie.takeoff", {"altitude_m": 1.0})
                 self.assertTrue(result.is_error)
                 self.assertFalse(result.structured_content["ok"])
                 self.assertEqual(result.structured_content["detail"], "forced controller failure")
                 self.assertEqual(len(drone.calls), 1)
+
+        asyncio.run(scenario())
+
+    def test_world_resources_list_snapshot_and_current_entities(self) -> None:
+        async def scenario() -> None:
+            server, _, _, _ = make_server()
+            async with Client(server) as client:
+                listed = await client.list_resources()
+                uris = {str(resource.uri) for resource in listed.resources}
+                self.assertIn("world://snapshot", uris)
+                self.assertIn("world://entities/inspection%20target", uris)
+
+                snapshot = await client.read_resource("world://snapshot")
+                payload = json.loads(snapshot.contents[0].text)
+                self.assertEqual(payload["entities"]["inspection target"]["pose"]["x_m"], 1.0)
+                self.assertEqual(payload["entities"]["inspection target"]["source"], "test")
+
+        asyncio.run(scenario())
+
+    def test_world_resource_reads_are_live_after_entity_update(self) -> None:
+        async def scenario() -> None:
+            server, _, _, world = make_server()
+            async with Client(server) as client:
+                first = await client.read_resource("world://entities/inspection%20target")
+                first_payload = json.loads(first.contents[0].text)
+                self.assertEqual(first_payload["pose"]["x_m"], 1.0)
+
+                world.upsert_entity(
+                    WorldEntity(
+                        "inspection target",
+                        "waypoint",
+                        Pose3D(4.5, -1.25, 0.75),
+                        source="perception-correction",
+                        confidence=0.95,
+                    )
+                )
+
+                second = await client.read_resource("world://entities/inspection%20target")
+                second_payload = json.loads(second.contents[0].text)
+                self.assertEqual(second_payload["pose"]["x_m"], 4.5)
+                self.assertEqual(second_payload["pose"]["y_m"], -1.25)
+                self.assertEqual(second_payload["source"], "perception-correction")
+
+        asyncio.run(scenario())
+
+    def test_mcp_tool_results_are_reflected_in_world_snapshot(self) -> None:
+        async def scenario() -> None:
+            server, _, _, _ = make_server()
+            async with Client(server) as client:
+                result = await client.call_tool("crazyflie.takeoff", {"altitude_m": 1.5})
+                self.assertFalse(result.is_error)
+
+                snapshot = await client.read_resource("world://snapshot")
+                payload = json.loads(snapshot.contents[0].text)
+                robot = payload["robots"]["crazyflie"]
+                self.assertEqual(robot["tool"], "crazyflie.takeoff")
+                self.assertTrue(robot["ok"])
+                self.assertEqual(robot["data"]["params"]["altitude_m"], 1.5)
 
         asyncio.run(scenario())
 
