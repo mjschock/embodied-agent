@@ -55,6 +55,7 @@
 - [x] Add adversarial metric checks for premature finish, wrong coordinates, and unnecessary actions
 - [x] Add optional live OpenAI benchmark command against scripted robots
 - [x] Test a trusted perception correction between robot steps with late-bound downstream navigation
+- [x] Add self-describing live physics result records and manual artifact workflow
 - [ ] Record/version live LLM benchmark results for model comparisons
 - [ ] Add broader perception-update / stale-plan benchmark cases
 - [x] Run the same suite against physics-backed simulator adapters
