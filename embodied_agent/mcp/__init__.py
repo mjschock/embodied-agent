@@ -8,6 +8,7 @@ from .agent import (
     AgentToolDescription,
     MCPAgentRunner,
 )
+from .openai_model import OpenAIAgentModel
 from .server import build_mcp_server, build_mcp_server_from_config, serve_stdio
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "AgentRunResult",
     "AgentToolDescription",
     "MCPAgentRunner",
+    "OpenAIAgentModel",
     "build_mcp_server",
     "build_mcp_server_from_config",
     "serve_stdio",
