@@ -17,7 +17,7 @@ class DefaultSimulationConfigTests(unittest.TestCase):
         self.assertEqual(crazyflie_config["adapter"], "gym_pybullet_drones")
         self.assertEqual(
             crazyflie_config["tools"],
-            ["observe", "takeoff", "goto", "land"],
+            ["observe", "reset", "takeoff", "goto", "land"],
         )
 
         registry = build_registry(config)
