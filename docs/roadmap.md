@@ -64,7 +64,9 @@
 - [x] Add physics-backed `AgentModel` comparison harness with oracle MCP real-simulator gate
 - [x] Add live OpenAI physics comparison command
 - [x] Add Microduck learned-policy skill eval cases for walking/kick/roll
-- [ ] Add four-embodiment capability-selection benchmark including Microduck
+- [x] Add four-embodiment capability-selection benchmark including Microduck
+- [ ] Run four-embodiment selection against a live AgentModel
+- [ ] Add combined four-embodiment real-simulator gate
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
