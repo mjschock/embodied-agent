@@ -11,11 +11,11 @@
 - [x] Add a real Crazyflie `VelocityAviary` adapter with semantic `takeoff/goto/land` skills
 - [ ] Make the real Crazyflie adapter the default sim backend after integration testing
 - [x] Add official LeRobot Humanoid MuJoCo controller adapter
-- [ ] Smoke-test Humanoid adapter against a local official runtime checkout
+- [x] Smoke-test Humanoid adapter against a local official runtime checkout
 - [x] Add bounded policy-backed humanoid `walk_velocity` skill
 - [ ] Add closed-loop humanoid navigation / `walk_to`
 - [x] Add upstream XLeRobot MuJoCo base-navigation adapter
-- [ ] Smoke-test XLeRobot adapter against a local upstream checkout
+- [x] Smoke-test XLeRobot adapter against a local upstream checkout
 - [ ] Attach XLeRobot arm/VLA policy before enabling `MANIPULATE`
 - [ ] Normalize observations
 - [ ] Add simulator reset/seed support
@@ -57,7 +57,7 @@
 - [x] Test a trusted perception correction between robot steps with late-bound downstream navigation
 - [ ] Record/version live LLM benchmark results for model comparisons
 - [ ] Add broader perception-update / stale-plan benchmark cases
-- [ ] Run the same suite against physics-backed simulator adapters
+- [x] Run the same suite against physics-backed simulator adapters
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
