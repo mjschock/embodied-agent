@@ -26,6 +26,26 @@ Each case retains both a natural-language instruction and a structured `Task`. T
 
 The tests inject an XLeRobot navigation failure and verify that planning metrics stay perfect while execution metrics fall. This makes controller failure distinguishable from planning failure.
 
+## Physics-backed deterministic baseline
+
+The same three structured cases can also run against all three upstream-backed simulator adapters in one process:
+
+```bash
+export XLEROBOT_UPSTREAM_ROOT="/path/to/XLeRobot"
+export LEROBOT_HUMANOID_RUNTIME_ROOT="/path/to/lerobot-humanoid-runtime"
+python -m embodied_agent.evals.physics_multi_robot
+```
+
+This swaps only the embodiment implementations. The `CapabilityPlanner`, `PlanExecutor`, `RobotToolRouter`, `WorldState`, target entities, expected tool sequence, and metrics are the same as the scripted baseline.
+
+The physics environment combines:
+
+- Crazyflie through real `gym-pybullet-drones` `VelocityAviary` / PyBullet;
+- XLeRobot through the upstream MuJoCo scene and the adapter's closed-loop base controller;
+- LeRobot Humanoid through the official `SimBipedalRobotController`, fixed-base and policy-free because the benchmark only requires `stand`.
+
+CI pins the upstream simulator/model revisions and requires the deterministic physics baseline to retain 1.0 robot-selection accuracy, exact-plan rate, task-completion rate, tool-call success rate, and executed-step coverage across all three waypoint variants. No physical hardware is used.
+
 ## AgentModel benchmark
 
 The same natural-language cases can now evaluate any provider implementing the `AgentModel` interface:
@@ -85,7 +105,7 @@ The command exits successfully only when `strict_task_success_rate == 1.0`, maki
 
 - record live LLM results over time and compare models against the deterministic/oracle references;
 - add perception-update and stale-plan tests where the target changes after an early action;
-- run the same cases against real simulator adapters;
+- run an LLM `AgentModel` through the physics-backed simulator suite;
 - add single-robot skill reliability and latency metrics;
 - add bounded recovery tasks where the first tool call fails;
 - add simulator reproducibility metrics;
