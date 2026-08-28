@@ -21,7 +21,7 @@ crazyflie-sim = [
   "gym-pybullet-drones @ git+https://github.com/learnsyslab/gym-pybullet-drones.git@24fccff4da746badb6eaa9f5055cd5d9b6613160"
 ]
 humanoid-sim = ["mujoco>=3,<4", "numpy>=2.0"]
-microduck-sim = ["mujoco>=3,<4", "numpy>=2.0", "onnxruntime>=1.23,<2"]
+microduck-sim = ["mujoco>=3,<4", "numpy>=2.0", "onnxruntime>=1.24.4,<2"]
 xlerobot-sim = ["mujoco>=3,<4", "numpy>=2.0"]
 mcp = ["mcp>=2,<3"]
 openai-agent = ["mcp>=2,<3", "openai>=3,<4"]
