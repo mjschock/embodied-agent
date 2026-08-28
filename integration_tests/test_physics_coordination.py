@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import unittest
 
@@ -21,14 +22,18 @@ class PhysicsCoordinationIntegrationTests(unittest.TestCase):
                 xlerobot_runtime_root=xlerobot_root,
                 humanoid_runtime_root=humanoid_root,
             )
+            diagnostics = result.to_dict()
+            print(json.dumps(diagnostics, indent=2, sort_keys=True))
 
-            self.assertEqual(len(result.cases), 3)
-            self.assertEqual(result.robot_selection_accuracy, 1.0)
-            self.assertEqual(result.plan_exact_match_rate, 1.0)
-            self.assertEqual(result.task_completion_rate, 1.0)
-            self.assertEqual(result.tool_call_success_rate, 1.0)
-            self.assertEqual(result.executed_step_coverage, 1.0)
-            self.assertTrue(all(case.execution_ok for case in result.cases))
+            self.assertEqual(len(result.cases), 3, diagnostics)
+            self.assertEqual(result.robot_selection_accuracy, 1.0, diagnostics)
+            self.assertEqual(result.plan_exact_match_rate, 1.0, diagnostics)
+            self.assertEqual(result.task_completion_rate, 1.0, diagnostics)
+            self.assertEqual(result.tool_call_success_rate, 1.0, diagnostics)
+            self.assertEqual(result.executed_step_coverage, 1.0, diagnostics)
+            self.assertTrue(
+                all(case.execution_ok for case in result.cases), diagnostics
+            )
 
         asyncio.run(scenario())
 
