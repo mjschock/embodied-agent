@@ -9,7 +9,7 @@
 
 ## M1 — Real simulators
 - [x] Add a real Crazyflie `VelocityAviary` adapter with semantic `takeoff/goto/land` skills
-- [ ] Make the real Crazyflie adapter the default sim backend after integration testing
+- [x] Make the real Crazyflie adapter the default sim backend after integration testing
 - [x] Add official LeRobot Humanoid MuJoCo controller adapter
 - [x] Smoke-test Humanoid adapter against a local official runtime checkout
 - [x] Add bounded policy-backed humanoid `walk_velocity` skill
