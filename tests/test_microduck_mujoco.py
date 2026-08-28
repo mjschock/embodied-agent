@@ -9,8 +9,9 @@ from embodied_agent.embodiments import MicroduckMuJoCo
 
 
 class FakeMicroduckRuntime:
-    def __init__(self) -> None:
+    def __init__(self, *, roll_completed: bool = True) -> None:
         self.started = False
+        self.roll_completed = roll_completed
         self.calls: list[tuple[str, dict]] = []
         self.state = {
             "position_m": (0.0, 0.0, 0.12),
@@ -52,7 +53,14 @@ class FakeMicroduckRuntime:
 
     def roll(self) -> dict:
         self.calls.append(("roll", {}))
-        return {**self.state, "upright": True}
+        return {
+            **self.state,
+            "completed": self.roll_completed,
+            "tipped": True,
+            "upright": True,
+            "roll_steps": 80,
+            "reset_after_timeout": not self.roll_completed,
+        }
 
 
 def build_robot(
@@ -125,6 +133,7 @@ class MicroduckAdapterTests(unittest.TestCase):
 
             roll = await robot.execute("roll")
             self.assertTrue(roll.ok)
+            self.assertTrue(roll.data["completed"])
             self.assertTrue(roll.data["upright"])
 
             reset = await robot.execute("reset")
@@ -132,6 +141,20 @@ class MicroduckAdapterTests(unittest.TestCase):
 
             await robot.disconnect()
             self.assertFalse(fake.started)
+
+        asyncio.run(scenario())
+
+    def test_roll_timeout_is_reported_as_skill_failure_even_after_safe_reset(self) -> None:
+        robot = build_robot(FakeMicroduckRuntime(roll_completed=False))
+
+        async def scenario() -> None:
+            await robot.connect()
+            result = await robot.execute("roll")
+            self.assertFalse(result.ok)
+            self.assertFalse(result.data["completed"])
+            self.assertTrue(result.data["reset_after_timeout"])
+            self.assertIn("safety window", result.detail)
+            await robot.disconnect()
 
         asyncio.run(scenario())
 
@@ -162,6 +185,7 @@ class MicroduckAdapterTests(unittest.TestCase):
                 await router.call("microduck.kick", {"foot": "middle"})
             roll = await router.call("microduck.roll", {})
             self.assertTrue(roll.ok)
+            self.assertTrue(roll.data["completed"])
             self.assertEqual(fake.calls[-1], ("roll", {}))
             await robot.disconnect()
 
