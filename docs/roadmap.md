@@ -33,9 +33,11 @@
 - [x] Add provider-agnostic iterative high-level MCP agent loop
 - [x] Re-read world state before every model decision
 - [x] Bound high-level agent runs with explicit maximum-step limits
+- [x] Add OpenAI Responses API `AgentModel` provider with Structured Outputs
+- [x] Add bounded OpenAI-agent CLI with explicit model selection
 - [ ] Add perception-to-world entity updates
 - [ ] Add bounded retries and failure recovery
-- [ ] Add a real LLM `AgentModel` provider
+- [ ] Add at least one additional LLM provider for portability
 
 ## M3 — Evals
 - [x] Add dependency-free three-robot baseline eval suite
@@ -44,12 +46,13 @@
 - [x] Verify execution failures are distinguishable from planning failures
 - [x] Use shared world entities instead of duplicated waypoint coordinates in baseline evals
 - [x] Contract-test a scripted MCP agent coordinating all three embodiments
+- [x] Offline-test the OpenAI decision adapter and current async Responses parse surface
 - [ ] Add perception-update / stale-plan world-state evals
 - [ ] Run the same suite against physics-backed simulator adapters
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
-- [ ] Compare LLM planner metrics against deterministic baseline
+- [ ] Compare live LLM planner metrics against deterministic baseline
 
 ## M4 — First physical embodiment
 - [ ] Add XLeRobot real adapter
