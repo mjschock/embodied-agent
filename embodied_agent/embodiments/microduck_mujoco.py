@@ -23,6 +23,7 @@ class _UpstreamMicroduckRuntime:
     MAX_YAW_RATE_RPS = 1.0
     KICK_POLICY_S = 0.5
     ROLL_POLICY_S = 2.0
+    PRE_BEHAVIOR_STAND_S = 1.0
     POST_BEHAVIOR_SETTLE_S = 0.4
     UPRIGHT_GRAVITY_Z = -0.85
 
@@ -202,7 +203,16 @@ class _UpstreamMicroduckRuntime:
         _, _, _, policy = self._require_started()
         if behavior not in policy.behavior_sessions:
             raise RuntimeError(f"Microduck {behavior} policy is not configured")
-        self._set_policy("walking")
+
+        # Upstream documents kick/roulade as episodic policies trained from a
+        # standing start. Establish that physical precondition under the learned
+        # standing policy before handing control to the behavior session.
+        self._set_policy("standing")
+        self._run_steps(math.ceil(self.PRE_BEHAVIOR_STAND_S / self.CONTROL_DT_S))
+        pre_state = self.observe()
+        if pre_state["projected_gravity"][2] >= self.UPRIGHT_GRAVITY_Z:
+            raise RuntimeError("Microduck episodic behavior requires an upright standing start")
+
         policy.trigger_behavior(behavior)
         while policy.behavior_mode is not None:
             self._step_policy_once()
