@@ -135,9 +135,12 @@ class XLeRobotMuJoCo(Embodiment):
     ) -> None:
         sim = self._require_sim()
         steps = max(1, math.ceil(duration_s / sim.timestep_s))
-        sim.set_base_velocity(lin_x, lin_y, yaw_rate)
         try:
             for i in range(steps):
+                # The real upstream MuJoCo demo closes a velocity-feedback loop on
+                # every simulation step. Recompute the low-level actuator command
+                # here instead of freezing one control value for the whole skill.
+                sim.set_base_velocity(lin_x, lin_y, yaw_rate)
                 sim.step()
                 if i % 100 == 0:
                     await asyncio.sleep(0)
@@ -278,6 +281,14 @@ class _MuJoCoXLeRobotRuntime:
         "Wrist_Roll_L",
         "Jaw_L",
     )
+    # These feedback gains intentionally mirror the current upstream keyboard
+    # controller. The semantic API remains bounded; this is only the low-level
+    # compensation needed to drive the upstream velocity actuators as designed.
+    _TRANSLATION_VELOCITY_KP = 10.0
+    _YAW_RATE_KP = 100.0
+    _YAW_ACTUATOR_LIMIT = 1.0
+    _WHEEL_RADIUS_M = 0.1
+    _WHEEL_VELOCITY_SCALE = 20.0
 
     def __init__(self, scene_path: Path) -> None:
         try:
@@ -329,19 +340,50 @@ class _MuJoCoXLeRobotRuntime:
 
     def set_base_velocity(self, lin_x: float, lin_y: float, yaw_rate: float) -> None:
         yaw = float(self.data.qpos[self._joint_qpos_adr["hinge_joint_z"]])
-        self.data.ctrl[self._base_actuators["x"]] = lin_x * math.cos(yaw) - lin_y * math.sin(yaw)
-        self.data.ctrl[self._base_actuators["y"]] = lin_x * math.sin(yaw) + lin_y * math.cos(yaw)
-        self.data.ctrl[self._base_actuators["yaw"]] = yaw_rate
+        cos_yaw = math.cos(yaw)
+        sin_yaw = math.sin(yaw)
 
-        radius = 0.1
-        wheel_scale = 20.0
+        x_dof = self._joint_dof_adr["slide_joint_x"]
+        y_dof = self._joint_dof_adr["slide_joint_y"]
+        yaw_dof = self._joint_dof_adr["hinge_joint_z"]
+        world_vx = float(self.data.qvel[x_dof])
+        world_vy = float(self.data.qvel[y_dof])
+        measured_yaw_rate = float(self.data.qvel[yaw_dof])
+
+        # Upstream transforms world-frame qvel into the chassis/body frame,
+        # then applies feed-forward + proportional velocity-error compensation.
+        body_vx = cos_yaw * world_vx + sin_yaw * world_vy
+        body_vy = -sin_yaw * world_vx + cos_yaw * world_vy
+        error_x = lin_x - body_vx
+        error_y = lin_y - body_vy
+
+        commanded_body_x = lin_x + self._TRANSLATION_VELOCITY_KP * error_x
+        commanded_body_y = lin_y + self._TRANSLATION_VELOCITY_KP * error_y
+        commanded_world_x = cos_yaw * commanded_body_x - sin_yaw * commanded_body_y
+        commanded_world_y = sin_yaw * commanded_body_x + cos_yaw * commanded_body_y
+        commanded_yaw_rate = _clip(
+            yaw_rate + self._YAW_RATE_KP * (yaw_rate - measured_yaw_rate),
+            -self._YAW_ACTUATOR_LIMIT,
+            self._YAW_ACTUATOR_LIMIT,
+        )
+
+        self.data.ctrl[self._base_actuators["x"]] = commanded_world_x
+        self.data.ctrl[self._base_actuators["y"]] = commanded_world_y
+        self.data.ctrl[self._base_actuators["yaw"]] = commanded_yaw_rate
+
+        # Match upstream wheel commands: wheel target velocities follow measured
+        # chassis velocity, while the slide/yaw actuators close the body-velocity loop.
         wheel_commands = (
-            lin_y - radius * yaw_rate,
-            -math.sqrt(3.0) * 0.5 * lin_x - 0.5 * lin_y - radius * yaw_rate,
-            math.sqrt(3.0) * 0.5 * lin_x - 0.5 * lin_y - radius * yaw_rate,
+            body_vy - self._WHEEL_RADIUS_M * measured_yaw_rate,
+            -math.sqrt(3.0) * 0.5 * body_vx
+            - 0.5 * body_vy
+            - self._WHEEL_RADIUS_M * measured_yaw_rate,
+            math.sqrt(3.0) * 0.5 * body_vx
+            - 0.5 * body_vy
+            - self._WHEEL_RADIUS_M * measured_yaw_rate,
         )
         for actuator_id, command in zip(self._wheel_actuators, wheel_commands):
-            self.data.ctrl[actuator_id] = wheel_scale * command
+            self.data.ctrl[actuator_id] = self._WHEEL_VELOCITY_SCALE * command
 
     def zero_base_velocity(self) -> None:
         for actuator_id in (*self._base_actuators.values(), *self._wheel_actuators):
