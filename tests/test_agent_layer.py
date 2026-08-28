@@ -122,6 +122,28 @@ class AgentToolTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_crazyflie_goto_preserves_omitted_timeout(self) -> None:
+        router, _, crazyflie, _ = self._router()
+
+        async def scenario() -> None:
+            goto_tool = next(
+                tool for tool in router.list_tools() if tool["name"] == "crazyflie.goto"
+            )
+            self.assertNotIn(
+                "default",
+                goto_tool["input_schema"]["properties"]["timeout_s"],
+            )
+            result = await router.call(
+                "crazyflie.goto",
+                {"x_m": 1.0, "y_m": -2.0, "z_m": 1.25},
+            )
+            self.assertTrue(result.ok)
+            request = crazyflie.calls[-1]
+            self.assertEqual(request.params["position"], (1.0, -2.0, 1.25))
+            self.assertNotIn("timeout_s", request.params)
+
+        asyncio.run(scenario())
+
     def test_capability_planner_binds_multi_robot_task(self) -> None:
         router, _, _, _ = self._router()
         planner = CapabilityPlanner(router)
