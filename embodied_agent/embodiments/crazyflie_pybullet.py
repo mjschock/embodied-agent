@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -24,6 +25,10 @@ class CrazyfliePyBullet(Embodiment):
         initial_position: tuple[float, float, float] = (0.0, 0.0, 0.1),
         position_tolerance_m: float = 0.03,
         slow_radius_m: float = 0.30,
+        default_timeout_s: float = 10.0,
+        max_timeout_s: float = 30.0,
+        timeout_safety_factor: float = 1.5,
+        timeout_settle_s: float = 1.0,
         env_factory: Callable[..., Any] | None = None,
     ) -> None:
         self.name = name
@@ -34,6 +39,18 @@ class CrazyfliePyBullet(Embodiment):
         self.initial_position = initial_position
         self.position_tolerance_m = position_tolerance_m
         self.slow_radius_m = slow_radius_m
+        self.default_timeout_s = float(default_timeout_s)
+        self.max_timeout_s = float(max_timeout_s)
+        self.timeout_safety_factor = float(timeout_safety_factor)
+        self.timeout_settle_s = float(timeout_settle_s)
+        if self.default_timeout_s <= 0.0:
+            raise ValueError("default_timeout_s must be positive")
+        if self.max_timeout_s < self.default_timeout_s:
+            raise ValueError("max_timeout_s must be >= default_timeout_s")
+        if self.timeout_safety_factor < 1.0:
+            raise ValueError("timeout_safety_factor must be >= 1.0")
+        if self.timeout_settle_s < 0.0:
+            raise ValueError("timeout_settle_s must be non-negative")
         self._env_factory = env_factory
         self._env: Any | None = None
         self._obs: Any | None = None
@@ -110,11 +127,8 @@ class CrazyfliePyBullet(Embodiment):
         target: tuple[float, float, float],
     ) -> SkillResult:
         np = self._numpy()
-        env = self._require_env()
         target_vec = np.asarray(target, dtype=float)
-        max_duration_s = float(request.params.get("timeout_s", 10.0))
-        if max_duration_s <= 0:
-            raise ValueError("timeout_s must be positive")
+        max_duration_s, timeout_source = self._resolve_timeout_s(request, target_vec)
 
         max_steps = max(1, int(max_duration_s * self.ctrl_freq_hz))
         final_error = float("inf")
@@ -138,6 +152,8 @@ class CrazyfliePyBullet(Embodiment):
                         "final_position_m": self._state_vector()[0:3].tolist(),
                         "position_error_m": final_error,
                         "steps": step_index,
+                        "timeout_s": max_duration_s,
+                        "timeout_source": timeout_source,
                     },
                 )
 
@@ -160,8 +176,34 @@ class CrazyfliePyBullet(Embodiment):
                 "final_position_m": self._state_vector()[0:3].tolist(),
                 "position_error_m": final_error,
                 "steps": max_steps,
+                "timeout_s": max_duration_s,
+                "timeout_source": timeout_source,
             },
         )
+
+    def _resolve_timeout_s(self, request: SkillRequest, target_vec: Any) -> tuple[float, str]:
+        explicit = request.params.get("timeout_s")
+        if explicit is not None:
+            timeout_s = float(explicit)
+            if timeout_s <= 0.0 or timeout_s > self.max_timeout_s:
+                raise ValueError(
+                    f"timeout_s must be > 0 and <= {self.max_timeout_s:.2f}"
+                )
+            return timeout_s, "explicit"
+
+        np = self._numpy()
+        current = self._state_vector()[0:3]
+        distance_m = float(np.linalg.norm(target_vec - current))
+        env = self._require_env()
+        speed_limit_mps = float(getattr(env, "SPEED_LIMIT", 0.25))
+        if not math.isfinite(speed_limit_mps) or speed_limit_mps <= 0.0:
+            speed_limit_mps = 0.25
+        ideal_travel_s = distance_m / speed_limit_mps
+        timeout_s = max(
+            self.default_timeout_s,
+            self.timeout_safety_factor * ideal_travel_s + self.timeout_settle_s,
+        )
+        return min(timeout_s, self.max_timeout_s), "distance-aware"
 
     def _step(self, action: Any) -> None:
         env = self._require_env()

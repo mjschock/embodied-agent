@@ -9,6 +9,8 @@ from embodied_agent.embodiments.crazyflie_pybullet import CrazyfliePyBullet
 
 
 class FakeVelocityAviary:
+    SPEED_LIMIT = 0.05
+
     def __init__(
         self,
         *,
@@ -35,7 +37,7 @@ class FakeVelocityAviary:
         magnitude = float(np.linalg.norm(direction))
         if magnitude > 0:
             direction /= magnitude
-            self.position += direction * 0.05 * float(action[0, 3])
+            self.position += direction * self.SPEED_LIMIT * float(action[0, 3])
         return self._obs(), -1, False, False, {"answer": 42}
 
     def close(self) -> None:
@@ -71,6 +73,24 @@ class CrazyfliePyBulletTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_default_timeout_expands_for_long_transit(self) -> None:
+        async def scenario() -> None:
+            robot = CrazyfliePyBullet(
+                env_factory=FakeVelocityAviary,
+                position_tolerance_m=0.025,
+                ctrl_freq_hz=1,
+                slow_radius_m=0.25,
+            )
+            await robot.connect()
+            result = await robot.execute("goto", position=(1.0, 0.0, 0.1))
+            self.assertTrue(result.ok)
+            self.assertEqual(result.data["timeout_source"], "distance-aware")
+            self.assertGreater(result.data["timeout_s"], 10.0)
+            self.assertLessEqual(result.data["timeout_s"], 30.0)
+            await robot.disconnect()
+
+        asyncio.run(scenario())
+
     def test_timeout_returns_structured_failure(self) -> None:
         async def scenario() -> None:
             robot = CrazyfliePyBullet(
@@ -86,6 +106,21 @@ class CrazyfliePyBulletTests(unittest.TestCase):
             )
             self.assertFalse(result.ok)
             self.assertEqual(result.data["steps"], 1)
+            self.assertEqual(result.data["timeout_source"], "explicit")
+            await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_explicit_timeout_is_bounded(self) -> None:
+        async def scenario() -> None:
+            robot = CrazyfliePyBullet(env_factory=FakeVelocityAviary)
+            await robot.connect()
+            with self.assertRaises(ValueError):
+                await robot.execute(
+                    "goto",
+                    position=(1.0, 0.0, 0.1),
+                    timeout_s=31.0,
+                )
             await robot.disconnect()
 
         asyncio.run(scenario())

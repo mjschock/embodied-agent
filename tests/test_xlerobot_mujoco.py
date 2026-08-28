@@ -58,10 +58,11 @@ class FakeXLeRobotRuntime:
 
 
 class XLeRobotMuJoCoTests(unittest.TestCase):
-    def _robot(self) -> XLeRobotMuJoCo:
+    def _robot(self, **kwargs) -> XLeRobotMuJoCo:
         return XLeRobotMuJoCo(
             scene_path="fake-scene.xml",
             sim_factory=FakeXLeRobotRuntime,
+            **kwargs,
         )
 
     def test_capability_boundary_and_drive_velocity(self) -> None:
@@ -98,11 +99,46 @@ class XLeRobotMuJoCoTests(unittest.TestCase):
                 max_duration_s=3.0,
             )
             self.assertTrue(result.ok, result)
+            self.assertEqual(result.data["timeout_source"], "explicit")
+            self.assertEqual(result.data["max_duration_s"], 3.0)
             self.assertLessEqual(result.data["position_error_m"], robot.position_tolerance_m)
             self.assertLessEqual(abs(result.data["yaw_error_rad"]), robot.yaw_tolerance_rad)
             self.assertEqual(robot._sim.vx_body, 0.0)
             self.assertEqual(robot._sim.vy_body, 0.0)
             self.assertEqual(robot._sim.yaw_rate, 0.0)
+            await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_default_navigation_timeout_expands_for_long_transit(self) -> None:
+        async def scenario() -> None:
+            robot = self._robot(max_linear_x_mps=0.1, max_linear_y_mps=0.1)
+            await robot.connect()
+            result = await robot.execute(
+                "navigate_to",
+                x_m=0.6,
+                y_m=0.0,
+                yaw_rad=0.0,
+            )
+            self.assertTrue(result.ok, result)
+            self.assertEqual(result.data["timeout_source"], "distance-aware")
+            self.assertGreater(result.data["max_duration_s"], 10.0)
+            self.assertLessEqual(result.data["max_duration_s"], 30.0)
+            await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_explicit_navigation_timeout_is_bounded(self) -> None:
+        async def scenario() -> None:
+            robot = self._robot()
+            await robot.connect()
+            with self.assertRaises(ValueError):
+                await robot.execute(
+                    "navigate_to",
+                    x_m=1.0,
+                    y_m=0.0,
+                    max_duration_s=31.0,
+                )
             await robot.disconnect()
 
         asyncio.run(scenario())
