@@ -9,7 +9,7 @@ from embodied_agent.evals.skill_metrics import SkillProbe, benchmark_robot_skill
 
 
 class CrazyfliePhysicsIntegrationTests(unittest.TestCase):
-    def test_takeoff_translate_observe_and_land_in_real_pybullet(self) -> None:
+    def test_takeoff_translate_observe_land_and_reset_in_real_pybullet(self) -> None:
         async def scenario() -> None:
             robot = CrazyfliePyBullet(
                 gui=False,
@@ -55,8 +55,16 @@ class CrazyfliePhysicsIntegrationTests(unittest.TestCase):
                 self.assertTrue(land.ok, land.detail)
                 self.assertLessEqual(land.data["position_error_m"], 0.06)
 
-                landed = await robot.observe()
-                self.assertAlmostEqual(landed.state["position_m"][2], 0.08, delta=0.07)
+                reset = await robot.execute("reset", seed=11)
+                self.assertTrue(reset.ok, reset.detail)
+                self.assertEqual(reset.data["seed"], 11)
+                self.assertAlmostEqual(reset.data["position_m"][0], 0.0, delta=1e-6)
+                self.assertAlmostEqual(reset.data["position_m"][1], 0.0, delta=1e-6)
+                self.assertAlmostEqual(reset.data["position_m"][2], 0.1, delta=1e-6)
+
+                repeat_reset = await robot.execute("reset")
+                self.assertTrue(repeat_reset.ok, repeat_reset.detail)
+                self.assertEqual(repeat_reset.data["seed"], 11)
             finally:
                 await robot.disconnect()
 
@@ -72,18 +80,18 @@ class CrazyfliePhysicsIntegrationTests(unittest.TestCase):
                 position_tolerance_m=0.06,
                 slow_radius_m=0.25,
             )
+            await robot.connect()
 
             async def prepare_attempt(robot, probe, attempt) -> None:
-                # Reconstruct and re-seed VelocityAviary before every sample. This is
-                # intentionally outside the benchmark clock so every timed skill sees
-                # the same simulator start condition without counting environment setup.
-                await robot.disconnect()
-                await robot.connect()
-                initial = await robot.observe()
-                self.assertEqual(initial.state["backend"], "gym-pybullet-drones")
-                self.assertAlmostEqual(initial.state["position_m"][0], 0.0, delta=1e-6)
-                self.assertAlmostEqual(initial.state["position_m"][1], 0.0, delta=1e-6)
-                self.assertAlmostEqual(initial.state["position_m"][2], 0.1, delta=1e-6)
+                # Reset and re-seed the same VelocityAviary instance before every
+                # sample. This is outside the benchmark clock so each measured skill
+                # begins from an identical simulator state without counting reset time.
+                reset = await robot.execute("reset", seed=0)
+                if not reset.ok:
+                    raise RuntimeError(f"Crazyflie reset failed: {reset.detail}")
+                self.assertAlmostEqual(reset.data["position_m"][0], 0.0, delta=1e-6)
+                self.assertAlmostEqual(reset.data["position_m"][1], 0.0, delta=1e-6)
+                self.assertAlmostEqual(reset.data["position_m"][2], 0.1, delta=1e-6)
 
                 # Horizontal translation and landing both require a stable airborne
                 # precondition. Establish it before timing the skill under test.

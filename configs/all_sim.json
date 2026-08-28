@@ -8,7 +8,7 @@
     "crazyflie": {
       "backend": "sim",
       "adapter": "gym_pybullet_drones",
-      "tools": ["observe", "takeoff", "goto", "land"]
+      "tools": ["observe", "reset", "takeoff", "goto", "land"]
     },
     "humanoid": {
       "backend": "sim",

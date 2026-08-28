@@ -20,7 +20,7 @@
 - [x] Add policy-backed Microduck MuJoCo adapter with stand/walk/kick/roll skills
 - [x] Smoke-test Microduck against pinned native runtime + official Space policies
 - [ ] Normalize observations
-- [ ] Add simulator reset/seed support
+- [x] Add simulator reset/seed support
 - [ ] Record episode traces
 
 ## M2 — Agent tools

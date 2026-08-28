@@ -19,8 +19,10 @@ class FakeVelocityAviary:
         initial_position: tuple[float, float, float],
     ) -> None:
         del gui, ctrl_freq_hz
-        self.position = np.asarray(initial_position, dtype=float)
+        self.initial_position = np.asarray(initial_position, dtype=float)
+        self.position = self.initial_position.copy()
         self.closed = False
+        self.reset_seeds: list[int | None] = []
 
     def _obs(self) -> np.ndarray:
         obs = np.zeros((1, 20), dtype=np.float32)
@@ -29,7 +31,8 @@ class FakeVelocityAviary:
         return obs
 
     def reset(self, *, seed: int | None = None):
-        del seed
+        self.reset_seeds.append(seed)
+        self.position = self.initial_position.copy()
         return self._obs(), {}
 
     def step(self, action: np.ndarray):
@@ -70,6 +73,58 @@ class CrazyfliePyBulletTests(unittest.TestCase):
             env = robot._env
             await robot.disconnect()
             self.assertTrue(env.closed)
+
+        asyncio.run(scenario())
+
+    def test_reset_restores_initial_state_and_tracks_seed(self) -> None:
+        async def scenario() -> None:
+            robot = CrazyfliePyBullet(
+                env_factory=FakeVelocityAviary,
+                seed=7,
+                initial_position=(0.0, 0.0, 0.1),
+                position_tolerance_m=0.025,
+            )
+            await robot.connect()
+            env = robot._env
+            self.assertEqual(env.reset_seeds, [7])
+
+            takeoff = await robot.execute("takeoff", altitude_m=0.5)
+            self.assertTrue(takeoff.ok)
+
+            reset = await robot.execute("reset", seed=123)
+            self.assertTrue(reset.ok)
+            self.assertEqual(reset.data["seed"], 123)
+            self.assertEqual(robot.seed, 123)
+            self.assertEqual(env.reset_seeds[-1], 123)
+            self.assertAlmostEqual(reset.data["position_m"][0], 0.0, delta=1e-6)
+            self.assertAlmostEqual(reset.data["position_m"][1], 0.0, delta=1e-6)
+            self.assertAlmostEqual(reset.data["position_m"][2], 0.1, delta=1e-6)
+
+            repeat = await robot.execute("reset")
+            self.assertTrue(repeat.ok)
+            self.assertEqual(repeat.data["seed"], 123)
+            self.assertEqual(env.reset_seeds[-1], 123)
+
+            await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_seed_validation_rejects_non_integer_and_out_of_range_values(self) -> None:
+        with self.assertRaises(ValueError):
+            CrazyfliePyBullet(env_factory=FakeVelocityAviary, seed=True)
+        with self.assertRaises(ValueError):
+            CrazyfliePyBullet(env_factory=FakeVelocityAviary, seed=-1)
+
+        async def scenario() -> None:
+            robot = CrazyfliePyBullet(env_factory=FakeVelocityAviary)
+            await robot.connect()
+            try:
+                with self.assertRaises(ValueError):
+                    await robot.execute("reset", seed=1.5)
+                with self.assertRaises(ValueError):
+                    await robot.execute("reset", seed=2**32)
+            finally:
+                await robot.disconnect()
 
         asyncio.run(scenario())
 
