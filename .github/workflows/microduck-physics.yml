@@ -21,8 +21,8 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
-      - name: Install Microduck simulator runtime
-        run: pip install -e ".[microduck-sim]"
+      - name: Install Microduck simulator and agent runtime
+        run: pip install -e ".[microduck-sim,mcp]"
       - name: Download pinned Microduck policies
         run: |
           mkdir -p .vendor/microduck-policies
@@ -38,8 +38,8 @@ jobs:
               -o ".vendor/microduck-policies/$policy" \
               "$base/$policy?download=true"
           done
-      - name: Run headless Microduck MuJoCo policy smoke
+      - name: Run headless Microduck MuJoCo policy and AgentModel evals
         env:
           MICRODUCK_RL_ROOT: ${{ github.workspace }}/.vendor/microduck_rl
           MICRODUCK_POLICY_DIR: ${{ github.workspace }}/.vendor/microduck-policies
-        run: python -m unittest discover -s integration_tests -p "test_microduck_physics.py" -v
+        run: python -m unittest discover -s integration_tests -p "test_microduck*.py" -v
