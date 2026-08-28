@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import unittest
 from collections import defaultdict, deque
-from typing import Any
 
 from embodied_agent.core import (
     Capability,
@@ -159,6 +158,60 @@ class SkillMetricTests(unittest.TestCase):
         self.assertEqual(payload["backend"], "fake-metric-runtime")
         self.assertEqual(payload["probe_count"], 2)
         self.assertEqual(len(payload["metrics"][0]["samples"]), 2)
+
+    def test_state_hooks_run_outside_timing_and_cleanup_after_skill_exception(self) -> None:
+        robot = FakeMetricRobot(
+            {"stand": [RuntimeError("controller timeout"), True]}
+        )
+        events: list[tuple[str, int, str]] = []
+
+        async def before_attempt(robot, probe, attempt) -> None:
+            events.append(("before", attempt, probe.skill))
+
+        async def after_attempt(robot, probe, attempt) -> None:
+            events.append(("after", attempt, probe.skill))
+
+        result = asyncio.run(
+            benchmark_robot_skills(
+                robot,
+                [SkillProbe("stand", attempts=2)],
+                clock=FakeClock([0.00, 0.01, 0.02, 0.04]),
+                before_attempt=before_attempt,
+                after_attempt=after_attempt,
+            )
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("before", 1, "stand"),
+                ("after", 1, "stand"),
+                ("before", 2, "stand"),
+                ("after", 2, "stand"),
+            ],
+        )
+        self.assertEqual(robot.calls["stand"], 2)
+        self.assertEqual(result.success_rate, 0.5)
+        self.assertAlmostEqual(result.mean_latency_ms, 15.0)
+        self.assertIn("controller timeout", result.metrics[0].samples[0].error)
+
+    def test_setup_hook_failure_aborts_invalid_benchmark_and_disconnects(self) -> None:
+        robot = FakeMetricRobot({"stand": [True]})
+
+        async def fail_setup(robot, probe, attempt) -> None:
+            raise RuntimeError("could not establish start state")
+
+        with self.assertRaisesRegex(RuntimeError, "start state"):
+            asyncio.run(
+                benchmark_robot_skills(
+                    robot,
+                    [SkillProbe("stand")],
+                    before_attempt=fail_setup,
+                )
+            )
+        self.assertFalse(robot.connected)
+        self.assertEqual(robot.disconnect_count, 1)
+        self.assertEqual(robot.calls["stand"], 0)
 
     def test_existing_connection_can_be_reused_without_lifecycle_mutation(self) -> None:
         robot = FakeMetricRobot({"stand": [True]})
