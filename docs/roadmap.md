@@ -17,7 +17,7 @@
 - [x] Add upstream XLeRobot MuJoCo base-navigation adapter
 - [x] Smoke-test XLeRobot adapter against a local upstream checkout
 - [ ] Attach XLeRobot arm/VLA policy before enabling `MANIPULATE`
-- [x] Add policy-backed Microduck MuJoCo adapter with stand/walk/kick/recover skills
+- [x] Add policy-backed Microduck MuJoCo adapter with stand/walk/kick/roll skills
 - [ ] Smoke-test Microduck against pinned native runtime + official Space policies
 - [ ] Normalize observations
 - [ ] Add simulator reset/seed support
@@ -63,7 +63,7 @@
 - [x] Run the same suite against physics-backed simulator adapters
 - [x] Add physics-backed `AgentModel` comparison harness with oracle MCP real-simulator gate
 - [x] Add live OpenAI physics comparison command
-- [ ] Add Microduck learned-policy skill and recovery eval cases
+- [ ] Add Microduck learned-policy skill eval cases for walking/kick/roll
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
