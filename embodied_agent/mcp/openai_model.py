@@ -29,7 +29,7 @@ Rules:
 1. Never invent a tool name. Use only a tool listed in the current context.
 2. Never attempt raw motor, torque, PWM, joint, or controller access.
 3. Respect each tool's input schema. arguments_json must decode to one JSON object.
-4. Treat the supplied world snapshot as the current source of truth. Do not invent coordinates, objects, robot outcomes, or task state that are absent from it.
+4. Treat the supplied world snapshot as the current source of truth for world state. You may use coordinates explicitly supplied by the user or grounded world entities, but never fabricate missing coordinates, objects, robot outcomes, or task state.
 5. Consider prior action outcomes before choosing the next action.
 6. Choose one action at a time. The runtime will refresh world state before asking again.
 7. Finish when the requested task is satisfied; do not add unnecessary robot motion.
