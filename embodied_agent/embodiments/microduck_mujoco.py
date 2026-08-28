@@ -22,8 +22,10 @@ class _UpstreamMicroduckRuntime:
     MAX_BACKWARD_MPS = 0.20
     MAX_YAW_RATE_RPS = 1.0
     KICK_POLICY_S = 0.5
-    ROLL_POLICY_S = 2.0
-    PRE_BEHAVIOR_STAND_S = 1.0
+    ROLL_POLICY_MAX_S = 3.0
+    ROLL_MIN_STEPS = 40
+    ROLL_MAX_STEPS = 150
+    ROLL_TIPPED_GRAVITY_Z = -0.3
     POST_BEHAVIOR_SETTLE_S = 0.4
     UPRIGHT_GRAVITY_Z = -0.85
 
@@ -86,7 +88,10 @@ class _UpstreamMicroduckRuntime:
             kick_right_onnx_path=str(self.kick_right_policy_path) if self.kick_right_policy_path else None,
             roulade_onnx_path=str(self.roll_policy_path) if self.roll_policy_path else None,
             kick_duration=self.KICK_POLICY_S,
-            roulade_duration=self.ROLL_POLICY_S,
+            # The official Space gates roll completion on physical state with a
+            # 150-step / 3 s hard window. Keep the behavior session alive for
+            # that whole window; roll() below performs the state termination.
+            roulade_duration=self.ROLL_POLICY_MAX_S,
             new_cmd_obs=True,
         )
         self.reset()
@@ -203,16 +208,7 @@ class _UpstreamMicroduckRuntime:
         _, _, _, policy = self._require_started()
         if behavior not in policy.behavior_sessions:
             raise RuntimeError(f"Microduck {behavior} policy is not configured")
-
-        # Upstream documents kick/roulade as episodic policies trained from a
-        # standing start. Establish that physical precondition under the learned
-        # standing policy before handing control to the behavior session.
-        self._set_policy("standing")
-        self._run_steps(math.ceil(self.PRE_BEHAVIOR_STAND_S / self.CONTROL_DT_S))
-        pre_state = self.observe()
-        if pre_state["projected_gravity"][2] >= self.UPRIGHT_GRAVITY_Z:
-            raise RuntimeError("Microduck episodic behavior requires an upright standing start")
-
+        self._set_policy("walking")
         policy.trigger_behavior(behavior)
         while policy.behavior_mode is not None:
             self._step_policy_once()
@@ -228,8 +224,57 @@ class _UpstreamMicroduckRuntime:
         return state
 
     def roll(self) -> dict[str, Any]:
-        state = self._run_behavior("roulade")
-        state["upright"] = state["projected_gravity"][2] < self.UPRIGHT_GRAVITY_Z
+        _, _, _, policy = self._require_started()
+        behavior = "roulade"
+        if behavior not in policy.behavior_sessions:
+            raise RuntimeError("Microduck roulade policy is not configured")
+
+        self._set_policy("walking")
+        policy.trigger_behavior(behavior)
+        tipped = False
+        upright = False
+        steps = 0
+
+        for steps in range(1, self.ROLL_MAX_STEPS + 1):
+            self._step_policy_once()
+            gravity_z = float(policy.get_projected_gravity()[2])
+            if gravity_z > self.ROLL_TIPPED_GRAVITY_Z:
+                tipped = True
+            upright = gravity_z < self.UPRIGHT_GRAVITY_Z
+            if tipped and upright and steps >= self.ROLL_MIN_STEPS:
+                self._set_policy("standing")
+                self._run_steps(math.ceil(self.POST_BEHAVIOR_SETTLE_S / self.CONTROL_DT_S))
+                state = self.observe()
+                state.update(
+                    {
+                        "completed": True,
+                        "tipped": True,
+                        "upright": state["projected_gravity"][2] < self.UPRIGHT_GRAVITY_Z,
+                        "roll_steps": steps,
+                        "reset_after_timeout": False,
+                    }
+                )
+                return state
+
+        # Match the Space's safety behavior at its hard roll window: never hand a
+        # tipped duck to the walking policy. Preserve the failed skill outcome even
+        # when reset restores a safe upright simulation state.
+        if not upright:
+            state = self.reset()
+            reset_after_timeout = True
+        else:
+            self._set_policy("standing")
+            state = self.observe()
+            reset_after_timeout = False
+        state.update(
+            {
+                "completed": False,
+                "tipped": tipped,
+                "upright": state["projected_gravity"][2] < self.UPRIGHT_GRAVITY_Z,
+                "roll_steps": steps,
+                "reset_after_timeout": reset_after_timeout,
+            }
+        )
         return state
 
 
@@ -328,7 +373,12 @@ class MicroduckMuJoCo(Embodiment):
             return SkillResult(self.name, skill, True, "Microduck kick policy executed.", dict(state))
         if skill == "roll":
             state = runtime.roll()
-            ok = bool(state.get("upright", True))
-            return SkillResult(self.name, skill, ok, "Microduck roll policy executed.", dict(state))
+            ok = bool(state.get("completed", False))
+            detail = (
+                "Microduck roll policy completed and returned upright."
+                if ok
+                else "Microduck roll policy did not complete before its safety window expired."
+            )
+            return SkillResult(self.name, skill, ok, detail, dict(state))
 
         return SkillResult(self.name, skill, False, f"Unsupported Microduck skill: {skill}")
