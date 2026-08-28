@@ -47,7 +47,7 @@ class ParamRule:
             schema["minimum"] = self.minimum
         if self.maximum is not None:
             schema["maximum"] = self.maximum
-        if not self.required:
+        if not self.required and self.default is not None:
             schema["default"] = self.default
         return schema
 
@@ -99,7 +99,9 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
             "x_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "y_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "z_m": _NUMBER(minimum=0.03, maximum=3.0),
-            "timeout_s": _NUMBER(required=False, default=10.0, minimum=0.1, maximum=30.0),
+            # Omission is meaningful: the robot adapter derives a distance-aware
+            # safe timeout from its actual simulator/runtime speed envelope.
+            "timeout_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
         },
     ),
     "land": SkillToolSpec(
@@ -229,8 +231,10 @@ class RobotToolRouter:
     @staticmethod
     def _to_robot_params(skill: str, params: dict[str, Any]) -> dict[str, Any]:
         if skill == "goto":
-            return {
+            robot_params: dict[str, Any] = {
                 "position": (params["x_m"], params["y_m"], params["z_m"]),
-                "timeout_s": params["timeout_s"],
             }
+            if params.get("timeout_s") is not None:
+                robot_params["timeout_s"] = params["timeout_s"]
+            return robot_params
         return params
