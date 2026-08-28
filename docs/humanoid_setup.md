@@ -14,7 +14,28 @@ uv sync --extra sim
 ```
 
 The initialized model submodule is important: the simulator resolves its MJCF scene
-from the runtime checkout.
+from the runtime checkout. The humanoid model repository has moved to the Hugging
+Face organization; older runtime commits may still contain the previous SSH URL in
+`.gitmodules`, but GitHub redirects it to `huggingface/lerobot-humanoid-model`.
+
+## Reproducible controller-only CI
+
+The repository's real MuJoCo integration smoke intentionally tests a narrower path
+than the full runtime installation. It pins both upstream inputs:
+
+- `huggingface/lerobot-humanoid-runtime` at `e4dc62795e83b2e69580cad4d3229bdb558e912e`;
+- `huggingface/lerobot-humanoid-model` at the runtime's recorded submodule commit
+  `222717c3faeef21709a578a088c267c8a5f4a4a9`.
+
+That smoke installs only `embodied-agent[humanoid-sim]` (`mujoco` + `numpy`) and
+runs `SimBipedalRobotController` directly from the pinned runtime checkout. It does
+not install LeRobot datasets, policy runtimes, or physical CAN dependencies because
+none are required to validate the controller's reset/stand/state contract.
+
+The CI smoke uses `fixed_base=True`. This deliberately verifies the official
+12-DOF MuJoCo controller without claiming that a no-policy biped can balance or
+walk. `Capability.WALK` remains absent unless an explicit locomotion policy is
+configured.
 
 ## 2. Point embodied-agent at the checkout
 
