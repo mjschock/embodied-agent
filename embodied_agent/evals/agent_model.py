@@ -9,6 +9,8 @@ from typing import Any
 
 from mcp import Client
 
+from embodied_agent.agent import RobotToolRouter
+from embodied_agent.core import RobotRegistry
 from embodied_agent.mcp import AgentDecision, AgentModel, MCPAgentRunner, build_mcp_server
 from embodied_agent.world import WorldState
 
@@ -92,6 +94,7 @@ class AgentModelEvalResult:
 
 
 AgentModelFactory = Callable[[EvalCase], AgentModel]
+AgentEvalStack = tuple[RobotRegistry, RobotToolRouter]
 
 
 def _expected_actions(case: EvalCase) -> tuple[ExpectedAgentAction, ...]:
@@ -162,6 +165,7 @@ async def evaluate_agent_model(
     cases: tuple[EvalCase, ...] | None = None,
     max_steps: int = 8,
     argument_tolerance: float = 1e-6,
+    stack: AgentEvalStack | None = None,
 ) -> AgentModelEvalResult:
     if max_steps < 1:
         raise ValueError("max_steps must be >= 1")
@@ -185,7 +189,7 @@ async def evaluate_agent_model(
         for entity in case.entities:
             world.upsert_entity(entity)
 
-        registry, router = _scripted_stack()
+        registry, router = stack if stack is not None else _scripted_stack()
         server = build_mcp_server(router, registry=registry, world=world)
         model = model_factory(case)
 
@@ -217,10 +221,7 @@ async def evaluate_agent_model(
         total_argument_matches += argument_matches
 
         sequence_exact = actual_tools == expected_tools
-        arguments_exact = (
-            len(run.actions) == len(expected)
-            and argument_matches == len(expected)
-        )
+        arguments_exact = len(run.actions) == len(expected) and argument_matches == len(expected)
         successful_actions = sum(1 for action in run.actions if action.ok)
         total_executed_actions += len(run.actions)
         total_successful_actions += successful_actions
