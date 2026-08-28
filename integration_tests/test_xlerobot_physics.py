@@ -58,6 +58,7 @@ class XLeRobotPhysicsIntegrationTests(unittest.TestCase):
                     max_duration_s=4.0,
                 )
                 self.assertTrue(navigate.ok, f"{navigate.detail} data={navigate.data}")
+                self.assertEqual(navigate.data["timeout_source"], "explicit")
                 self.assertLessEqual(
                     navigate.data["position_error_m"], robot.position_tolerance_m
                 )
@@ -81,6 +82,7 @@ class XLeRobotPhysicsIntegrationTests(unittest.TestCase):
             )
             await robot.connect()
             try:
+                resolved_budgets: list[float] = []
                 for label, x_m, y_m in (
                     ("workbench-a", 1.5, 0.5),
                     ("workbench-b", -1.0, 1.25),
@@ -91,18 +93,21 @@ class XLeRobotPhysicsIntegrationTests(unittest.TestCase):
                         x_m=x_m,
                         y_m=y_m,
                         yaw_rad=0.0,
-                        max_duration_s=10.0,
                     )
                     self.assertTrue(
                         result.ok,
                         f"{label}: {result.detail} data={result.data}",
                     )
+                    self.assertEqual(result.data["timeout_source"], "distance-aware")
+                    resolved_budgets.append(result.data["max_duration_s"])
                     self.assertLessEqual(
                         result.data["position_error_m"], robot.position_tolerance_m
                     )
                     self.assertLessEqual(
                         abs(result.data["yaw_error_rad"]), robot.yaw_tolerance_rad
                     )
+                self.assertGreater(resolved_budgets[-1], 10.0)
+                self.assertLessEqual(resolved_budgets[-1], 30.0)
             finally:
                 await robot.disconnect()
 
