@@ -72,7 +72,8 @@
 - [x] Add single-robot skill success rate and latency metrics
 - [x] Apply skill reliability metrics to pinned Microduck backend
 - [x] Apply skill reliability metrics to pinned LeRobot Humanoid stand/reset backend
-- [ ] Apply skill reliability metrics to pinned Crazyflie/XLeRobot backends
+- [x] Apply skill reliability metrics to pinned XLeRobot navigation backend
+- [ ] Apply skill reliability metrics to pinned Crazyflie backend
 - [ ] Measure Humanoid learned-walking reliability when a pinned policy is provisioned in CI
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
