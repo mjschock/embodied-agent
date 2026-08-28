@@ -40,19 +40,24 @@
 - [ ] Add at least one additional LLM provider for portability
 
 ## M3 — Evals
-- [x] Add dependency-free three-robot baseline eval suite
+- [x] Add dependency-free three-robot deterministic baseline eval suite
 - [x] Measure robot-selection accuracy and plan exact-match
 - [x] Measure multi-step task completion, tool success, and execution coverage
 - [x] Verify execution failures are distinguishable from planning failures
 - [x] Use shared world entities instead of duplicated waypoint coordinates in baseline evals
 - [x] Contract-test a scripted MCP agent coordinating all three embodiments
 - [x] Offline-test the OpenAI decision adapter and current async Responses parse surface
+- [x] Add provider-agnostic `AgentModel` benchmark over the same three-robot tasks
+- [x] Separately score tool selection, grounded arguments, execution, finish behavior, strict task success, and action efficiency
+- [x] Add adversarial metric checks for premature finish, wrong coordinates, and unnecessary actions
+- [x] Add optional live OpenAI benchmark command against scripted robots
+- [ ] Record/version live LLM benchmark results for model comparisons
 - [ ] Add perception-update / stale-plan world-state evals
 - [ ] Run the same suite against physics-backed simulator adapters
 - [ ] Add single-robot skill success rate and latency metrics
 - [ ] Add recovery-from-failure tasks
 - [ ] Add sim reproducibility / deterministic seed metrics
-- [ ] Compare live LLM planner metrics against deterministic baseline
+- [ ] Compare physics-backed LLM task success against deterministic orchestration
 
 ## M4 — First physical embodiment
 - [ ] Add XLeRobot real adapter
