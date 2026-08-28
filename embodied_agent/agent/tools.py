@@ -126,7 +126,9 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
             "x_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "y_m": _NUMBER(minimum=-20.0, maximum=20.0),
             "yaw_rad": _NUMBER(required=False, default=0.0, minimum=-math.tau, maximum=math.tau),
-            "max_duration_s": _NUMBER(required=False, default=10.0, minimum=0.1, maximum=30.0),
+            # As with drone goto, omission lets the adapter derive a bounded
+            # duration from the requested transit and configured speed envelope.
+            "max_duration_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
         },
     ),
     "stand": SkillToolSpec("stand", Capability.STAND),
@@ -237,4 +239,6 @@ class RobotToolRouter:
             if params.get("timeout_s") is not None:
                 robot_params["timeout_s"] = params["timeout_s"]
             return robot_params
+        if skill == "navigate_to" and params.get("max_duration_s") is None:
+            return {key: value for key, value in params.items() if key != "max_duration_s"}
         return params
