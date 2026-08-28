@@ -1,0 +1,26 @@
+name: xlerobot-physics
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  xlerobot-physics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Vector-Wangel/XLeRobot
+          ref: 3d14695e40c9c68229c0aacffca6053c75cd3eb6
+          path: .vendor/XLeRobot
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[xlerobot-sim]"
+      - name: Run headless XLeRobot MuJoCo integration smoke
+        env:
+          XLEROBOT_UPSTREAM_ROOT: ${{ github.workspace }}/.vendor/XLeRobot
+        run: python -m unittest discover -s integration_tests -p "test_xlerobot_physics.py" -v
