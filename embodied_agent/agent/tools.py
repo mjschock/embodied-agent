@@ -152,6 +152,15 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
         {"foot": ParamRule(kind="string", choices=("left", "right"))},
     ),
     "roll": SkillToolSpec("roll", Capability.ROLL),
+    "manipulate": SkillToolSpec(
+        "manipulate",
+        Capability.MANIPULATE,
+        {
+            "skill": ParamRule(kind="string"),
+            "target": ParamRule(kind="string", required=False, default=None),
+            "max_duration_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
+        },
+    ),
 }
 
 
@@ -251,4 +260,6 @@ class RobotToolRouter:
             return robot_params
         if skill == "navigate_to" and params.get("max_duration_s") is None:
             return {key: value for key, value in params.items() if key != "max_duration_s"}
+        if skill == "manipulate":
+            return {key: value for key, value in params.items() if value is not None}
         return params
