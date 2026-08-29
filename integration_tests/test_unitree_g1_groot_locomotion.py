@@ -57,6 +57,10 @@ def _wrap_angle(value: float) -> float:
     return (value + math.pi) % (2.0 * math.pi) - math.pi
 
 
+def _rms(values: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(np.square(values))))
+
+
 class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
     def test_forward_normalized_axis_against_untethered_world_pose(self) -> None:
         async def scenario() -> None:
@@ -164,11 +168,24 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                                     list(controller_output.values()),
                                     dtype=np.float64,
                                 )
+                                body_q = np.asarray(raw["body_q"], dtype=np.float64)[:15].copy()
+                                body_dq = np.asarray(raw["body_dq"], dtype=np.float64)[:15].copy()
+                                lowcmd_target_q = np.asarray(
+                                    [native.msg.motor_cmd[index].q for index in range(15)],
+                                    dtype=np.float64,
+                                )
                                 self.assertEqual(cmd.shape, (3,))
                                 self.assertEqual(groot_action.shape, (15,))
+                                self.assertEqual(output_values.shape, (15,))
+                                self.assertEqual(body_q.shape, (15,))
+                                self.assertEqual(body_dq.shape, (15,))
+                                self.assertEqual(lowcmd_target_q.shape, (15,))
                                 self.assertTrue(np.isfinite(cmd).all())
                                 self.assertTrue(np.isfinite(groot_action).all())
                                 self.assertTrue(np.isfinite(output_values).all())
+                                self.assertTrue(np.isfinite(body_q).all())
+                                self.assertTrue(np.isfinite(body_dq).all())
+                                self.assertTrue(np.isfinite(lowcmd_target_q).all())
                                 sample.update(
                                     {
                                         "controller_input_remote_ly": float(
@@ -182,6 +199,10 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                                             np.linalg.norm(output_values)
                                         ),
                                         "controller_output_count": int(output_values.size),
+                                        "controller_target_q": output_values.tolist(),
+                                        "lowcmd_target_q": lowcmd_target_q.tolist(),
+                                        "body_q": body_q.tolist(),
+                                        "body_dq": body_dq.tolist(),
                                     }
                                 )
                             samples.append(sample)
@@ -247,6 +268,27 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                             self.assertEqual(walk_policy_calls, 0)
                         else:
                             self.assertGreater(walk_policy_calls, 0)
+
+                        controller_targets = np.asarray(
+                            [sample["controller_target_q"] for sample in steady_controller_samples],
+                            dtype=np.float64,
+                        )
+                        lowcmd_targets = np.asarray(
+                            [sample["lowcmd_target_q"] for sample in steady_controller_samples],
+                            dtype=np.float64,
+                        )
+                        body_q = np.asarray(
+                            [sample["body_q"] for sample in steady_controller_samples],
+                            dtype=np.float64,
+                        )
+                        body_dq = np.asarray(
+                            [sample["body_dq"] for sample in steady_controller_samples],
+                            dtype=np.float64,
+                        )
+                        self.assertEqual(controller_targets.shape[1], 15)
+                        self.assertEqual(lowcmd_targets.shape, controller_targets.shape)
+                        self.assertEqual(body_q.shape, controller_targets.shape)
+                        self.assertEqual(body_dq.shape, controller_targets.shape)
 
                         # Return to the public semantic standing boundary after
                         # every internal calibration command.
@@ -316,6 +358,29 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                                     ]
                                 )
                             ),
+                            "controller_target_temporal_std_l2_rad": float(
+                                np.linalg.norm(np.std(controller_targets, axis=0))
+                            ),
+                            "controller_target_peak_to_peak_l2_rad": float(
+                                np.linalg.norm(np.ptp(controller_targets, axis=0))
+                            ),
+                            "lowcmd_target_temporal_std_l2_rad": float(
+                                np.linalg.norm(np.std(lowcmd_targets, axis=0))
+                            ),
+                            "lowcmd_target_peak_to_peak_l2_rad": float(
+                                np.linalg.norm(np.ptp(lowcmd_targets, axis=0))
+                            ),
+                            "lowcmd_vs_controller_target_rms_rad": _rms(
+                                lowcmd_targets - controller_targets
+                            ),
+                            "body_q_temporal_std_l2_rad": float(
+                                np.linalg.norm(np.std(body_q, axis=0))
+                            ),
+                            "body_q_peak_to_peak_l2_rad": float(
+                                np.linalg.norm(np.ptp(body_q, axis=0))
+                            ),
+                            "body_dq_rms_rad_s": _rms(body_dq),
+                            "body_q_tracking_rms_rad": _rms(body_q - lowcmd_targets),
                         }
 
                     results = [
@@ -330,8 +395,9 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
 
                     # This remains a characterization gate, not an SI calibration.
                     # Require the real command/policy pipeline plus a finite,
-                    # non-collapsed untethered simulation. World-pose response is
-                    # recorded so any locomotion claim must come from measured motion.
+                    # non-collapsed untethered simulation. World-pose response and
+                    # lower-body target/tracking activity are recorded so any future
+                    # locomotion claim comes from measured actuation, not assumptions.
                     for result in results:
                         numeric = [
                             value
