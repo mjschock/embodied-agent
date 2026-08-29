@@ -9,7 +9,8 @@ jobs:
   unitree-g1-envhub-physics:
     runs-on: ubuntu-latest
     env:
-      MUJOCO_GL: egl
+      MUJOCO_GL: osmesa
+      PYOPENGL_PLATFORM: osmesa
       SDL_VIDEODRIVER: dummy
       PYGAME_HIDE_SUPPORT_PROMPT: "1"
     steps:
@@ -22,6 +23,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+      - name: Install OSMesa software rendering runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libosmesa6-dev
       - name: Install pinned G1 EnvHub runtime
         run: |
           python -m pip install --upgrade pip
