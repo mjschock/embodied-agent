@@ -14,6 +14,7 @@ jobs:
       SDL_VIDEODRIVER: dummy
       PYGAME_HIDE_SUPPORT_PROMPT: "1"
       PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
       MALLOC_CHECK_: "3"
       CYCLONEDDS_HOME: ${{ github.workspace }}/.vendor/cyclonedds/install
       LD_LIBRARY_PATH: ${{ github.workspace }}/.vendor/cyclonedds/install/lib
@@ -106,8 +107,12 @@ jobs:
           echo "f645da599d4ca3d29ed273c8f4712620bb680d34977469ca3aeabe5bb9631c18  .vendor/groot-policies/GR00T-WholeBodyControl-Balance.onnx" | sha256sum -c -
           echo "7c82255b6905ffcc4468fa7f8ddcf7b70db168cf1042107ccab887cb6a8e5407  .vendor/groot-policies/GR00T-WholeBodyControl-Walk.onnx" | sha256sum -c -
       - name: Run untethered normalized locomotion characterization
+        timeout-minutes: 3
         env:
           UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
-        run: |
-          python -m unittest discover -s integration_tests -p "test_unitree_g1_groot_locomotion.py" -v
-          python -m unittest discover -s integration_tests -p "test_unitree_g1_groot_preprocessing.py" -v
+        run: python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_locomotion.py" -v
+      - name: Run GR00T preprocessing A/B characterization
+        timeout-minutes: 3
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+        run: python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_preprocessing.py" -v
