@@ -14,6 +14,11 @@ jobs:
       PYGAME_HIDE_SUPPORT_PROMPT: "1"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: unitreerobotics/unitree_sdk2_python
+          ref: 65691c8a8bc53b98d3976dba4dbf9d5d20b2e7f5
+          path: .vendor/unitree-sdk2-python
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -22,7 +27,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install \
             "cyclonedds==0.10.2" \
-            "unitree-sdk2==1.0.1" \
             "mujoco>=3,<4" \
             "numpy>=1.24,<2.3" \
             "pyyaml>=6,<7" \
@@ -37,10 +41,16 @@ jobs:
             "scipy>=1.10,<2" \
             "termcolor>=2.4,<4" \
             "pygame>=2.5,<2.7"
+          python -m pip install -e .vendor/unitree-sdk2-python
+          python - <<'PY'
+          import unitree_sdk2py
+          from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+          print("unitree_sdk2py source import OK", ChannelFactoryInitialize)
+          PY
       - name: Check out pinned Unitree G1 EnvHub repository
         run: |
           git clone https://huggingface.co/lerobot/unitree-g1-mujoco .vendor/unitree-g1-mujoco
-          git -C .vendor/unitree-g1-mujoco checkout a38dc86
+          git -C .vendor/unitree-g1-mujoco checkout a38dc8617f0fca51b38e9354dc58ee35ad850fb5
           git -C .vendor/unitree-g1-mujoco lfs pull
           git -C .vendor/unitree-g1-mujoco rev-parse HEAD
       - name: Run headless MuJoCo reset and physics-step smoke
