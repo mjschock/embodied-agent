@@ -14,6 +14,9 @@ import yaml
 from embodied_agent.embodiments import UnitreeG1LeRobot
 
 
+MAX_STAND_TILT_RAD = 0.05
+
+
 class UnitreeG1GrootStandTests(TestCase):
     def test_semantic_stand_runs_pinned_groot_balance_policy_in_envhub(self) -> None:
         async def scenario() -> None:
@@ -113,6 +116,7 @@ class UnitreeG1GrootStandTests(TestCase):
                         math.hypot(roll, pitch)
                         for roll, pitch in zip(roll_samples, pitch_samples, strict=True)
                     ]
+                    final_tilt_rad = math.hypot(roll_samples[-1], pitch_samples[-1])
                     metrics = {
                         "samples": len(tilt_samples),
                         "duration_s": 2.0,
@@ -122,14 +126,16 @@ class UnitreeG1GrootStandTests(TestCase):
                         "mean_tilt_rad": sum(tilt_samples) / len(tilt_samples),
                         "final_roll_rad": roll_samples[-1],
                         "final_pitch_rad": pitch_samples[-1],
+                        "final_tilt_rad": final_tilt_rad,
                         "controller_output_joints": len(controller_output),
                     }
                     print("GROOT_STAND_METRICS " + json.dumps(metrics, sort_keys=True), flush=True)
 
-                    # First pinned behavioral gate: reject an obviously fallen body
-                    # while recording the actual envelope so the threshold can be
-                    # tightened from evidence rather than guessed.
-                    self.assertLess(metrics["max_tilt_rad"], 1.0)
+                    # The first pinned run measured 0.0 rad max/final roll-pitch tilt
+                    # across 100 samples. Keep a small nonzero behavioral envelope
+                    # rather than making standing depend on bit-for-bit IMU output.
+                    self.assertLess(metrics["max_tilt_rad"], MAX_STAND_TILT_RAD)
+                    self.assertLess(metrics["final_tilt_rad"], MAX_STAND_TILT_RAD)
                 finally:
                     await robot.disconnect()
 
