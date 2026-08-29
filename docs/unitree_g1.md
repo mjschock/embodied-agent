@@ -72,15 +72,46 @@ A non-empty joint-position observation must contain all 29 joints.
 }
 ```
 
-## Runtime installation caveat
+## Pinned EnvHub physics evidence
 
-The project provides an optional `unitree-g1` dependency for LeRobot's G1 extra, but the upstream G1 setup also requires Unitree SDK2 Python/CycloneDDS outside that extra. Current LeRobot documentation uses Python 3.12, installs `unitree_sdk2_python`, then installs LeRobot's `unitree_g1` extra. The MuJoCo environment additionally needs its simulation dependencies.
+The dedicated `unitree-g1-physics` workflow now launches and steps the official Hub-hosted MuJoCo environment headlessly. It pins:
 
-Because those dependencies are substantially heavier than the dependency-free contract test, runtime MuJoCo validation is tracked separately rather than implied by this adapter PR.
+- EnvHub `lerobot/unitree-g1-mujoco` at `a38dc8617f0fca51b38e9354dc58ee35ad850fb5`;
+- official `unitreerobotics/unitree_sdk2_python` source at `65691c8a8bc53b98d3976dba4dbf9d5d20b2e7f5`;
+- CycloneDDS `0.10.2` on Python 3.10;
+- MuJoCo software OpenGL through OSMesa on the CPU-only hosted runner.
+
+The smoke performs a real reset with seed 123 and five zero-action physics steps. Every returned observation must be finite, reward remains zero, and the environment must remain non-terminated/non-truncated.
+
+### Runtime issues discovered by the probe
+
+The diagnostic bring-up found two setup issues before physics could run:
+
+1. the published `unitree-sdk2==1.0.1` package failed while importing `unitree_sdk2py.b2`, whereas the current official source tree contains that module; the workflow therefore pins and installs the official source checkout instead;
+2. EGL could import on the hosted CPU runner but had no usable EGL device, so the non-rendering smoke uses MuJoCo's OSMesa software backend instead.
+
+Both fixes are pinned in the workflow rather than hidden in local setup instructions.
+
+### Known upstream observation-space mismatch
+
+The pinned EnvHub runtime exposes a 29-D action space and declares a 97-D observation space (`29 * 3 + 10`). The actual reset/step observation is **100-D**.
+
+The physics gate records the raw component sizes explicitly:
+
+```text
+body_q              29
+body_dq             29
+body_tau_est        29
+floating_base_pose   7
+floating_base_vel    6
+floating_base_acc    6
+```
+
+The environment concatenates 29 position + 29 velocity + 29 torque values, the first 4 pose values, the first 3 velocity values, and all 6 acceleration values: `87 + 4 + 3 + 6 = 100`. Its declared observation space budgets only 3 acceleration values. The test intentionally asserts both the declared `(97,)` space and the actual `(100,)` runtime result so an upstream correction becomes visible instead of silently changing our evidence.
 
 ## CI evidence
 
-The dedicated `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobot v0.6.1 source assumptions:
+The `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobot v0.6.1 source assumptions:
 
 - 29-joint model;
 - `connect`, `disconnect`, `get_observation`, `send_action`, and `reset` surface;
@@ -89,11 +120,12 @@ The dedicated `unitree-g1-lerobot-contract` workflow statically verifies the pin
 - controller reset on robot reset;
 - GR00T balance-policy selection for near-zero commands.
 
-Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets.
+Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly without implying that the full LeRobot/GR00T controller stack has been executed.
 
 ## Not yet proven
 
-- successful launch of the official Hub-hosted G1 MuJoCo environment from `embodied-agent` CI;
+- full LeRobot v0.6.1 `UnitreeG1.connect()` against the pinned EnvHub simulator;
+- GR00T balance/standing policy execution through `UnitreeG1LeRobot`;
 - locomotion-axis calibration to physical m/s and rad/s;
 - G1 `WALK` capability through the common semantic API;
 - physical G1 execution;

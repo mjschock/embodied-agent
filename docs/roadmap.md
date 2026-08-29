@@ -20,7 +20,8 @@
 - [x] Add policy-backed Microduck MuJoCo adapter with stand/walk/kick/roll skills
 - [x] Smoke-test Microduck against pinned native runtime + official Space policies
 - [x] Add native LeRobot Unitree G1 simulation-capable semantic adapter
-- [ ] Smoke-test the official Hub-hosted Unitree G1 MuJoCo environment in pinned CI
+- [x] Smoke-test the official Hub-hosted Unitree G1 MuJoCo environment in pinned CI
+- [ ] Track/fix upstream G1 EnvHub declared 97-D vs runtime 100-D observation-space mismatch
 - [ ] Calibrate G1 normalized locomotion axes before advertising SI-unit `WALK`
 - [ ] Normalize observations
 - [x] Add simulator reset/seed support
