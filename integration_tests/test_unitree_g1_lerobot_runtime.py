@@ -28,6 +28,11 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                     "ENABLE_OFFSCREEN": False,
                     "USE_JOYSTICK": 0,
                     "PRINT_SCENE_INFORMATION": False,
+                    # The pinned Unitree/CycloneDDS 0.10.2 stack succeeds on
+                    # Python 3.12 with interface auto-detection, but the explicit
+                    # Unitree `lo` XML path aborts natively. Keep both ends of the
+                    # simulated DDS bridge on the same auto-selected domain-0 path.
+                    "INTERFACE": None,
                 }
             )
             config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
@@ -44,6 +49,7 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                 is_simulation=True,
                 controller=None,
                 gravity_compensation=False,
+                simulation_dds_interface=None,
             )
 
             with (
@@ -57,6 +63,7 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                     self.assertEqual(observation.state["backend"], "lerobot-unitree-g1")
                     self.assertTrue(observation.state["is_simulation"])
                     self.assertIsNone(observation.state["controller"])
+                    self.assertEqual(observation.state["simulation_dds_interface"], "auto")
                     self.assertEqual(len(observation.state["joint_position_rad"]), 29)
                     self.assertEqual(len(observation.state["joint_velocity_rad_s"]), 29)
                     self.assertEqual(len(observation.state["joint_torque_est_nm"]), 29)
@@ -78,6 +85,7 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                     self.assertTrue(result.ok)
                     self.assertTrue(result.data["is_simulation"])
                     self.assertIsNone(result.data["controller"])
+                    self.assertEqual(result.data["simulation_dds_interface"], "auto")
 
                     after_reset = await robot.observe()
                     self.assertEqual(len(after_reset.state["joint_position_rad"]), 29)
