@@ -80,7 +80,12 @@
 - [x] Extend sim reproducibility probes to Microduck and LeRobot Humanoid
 - [ ] Compare physics-backed LLM task success against deterministic orchestration
 
-## M4 — First physical embodiment
+## M4 — Physical / native LeRobot embodiments
+- [x] Add native LeRobot SO-101 observation/reference adapter
+- [x] Contract-test SO-101 assumptions against pinned LeRobot v0.6.1 source
+- [x] Gate SO-101 `MANIPULATE` behind a named semantic executor and behavior allowlist
+- [ ] Smoke-test `SO101LeRobot` against a physical SO-101 follower
+- [ ] Attach and evaluate a concrete SO-101 LeRobot manipulation policy/behavior executor
 - [ ] Add XLeRobot real adapter
 - [ ] Preserve identical high-level skill API
 - [ ] Add emergency stop / safety state
