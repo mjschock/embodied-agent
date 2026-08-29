@@ -17,6 +17,13 @@ class UnitreeG1LeRobot(Embodiment):
     only when a lower-body locomotion controller is configured; the implementation
     sends zero normalized remote axes so the controller selects its balance/standing
     behavior.
+
+    LeRobot v0.6.1 hardcodes the ``lo`` network interface when it initializes the
+    Unitree SDK2 DDS transport in simulation. CycloneDDS 0.10.2 on Python 3.12 can
+    initialize the same domain successfully with interface auto-detection, while the
+    explicit Unitree ``lo`` XML path aborts natively. ``simulation_dds_interface``
+    therefore defaults to ``None`` (auto-detect) for simulated G1 instances only.
+    Physical G1 initialization is left untouched.
     """
 
     REMOTE_AXES = ("remote.lx", "remote.ly", "remote.rx", "remote.ry")
@@ -30,6 +37,7 @@ class UnitreeG1LeRobot(Embodiment):
         robot_ip: str = "192.168.123.164",
         gravity_compensation: bool = False,
         default_positions: tuple[float, ...] | list[float] | None = None,
+        simulation_dds_interface: str | None = None,
         robot_factory: NativeRobotFactory | None = None,
     ) -> None:
         self.name = name
@@ -41,6 +49,11 @@ class UnitreeG1LeRobot(Embodiment):
         self.default_positions = None if default_positions is None else tuple(float(v) for v in default_positions)
         if self.default_positions is not None and len(self.default_positions) != 29:
             raise ValueError("Unitree G1 default_positions must contain exactly 29 values")
+        if simulation_dds_interface is not None:
+            simulation_dds_interface = simulation_dds_interface.strip()
+            if not simulation_dds_interface:
+                raise ValueError("simulation_dds_interface must be a non-empty string or null")
+        self.simulation_dds_interface = simulation_dds_interface
         self._robot_factory = robot_factory
         self._robot: Any | None = None
 
@@ -61,6 +74,7 @@ class UnitreeG1LeRobot(Embodiment):
             robot_ip=self.robot_ip,
             gravity_compensation=self.gravity_compensation,
             default_positions=self.default_positions,
+            simulation_dds_interface=self.simulation_dds_interface,
         )
         robot.connect()
         self._robot = robot
@@ -102,6 +116,7 @@ class UnitreeG1LeRobot(Embodiment):
             "backend": self.backend,
             "is_simulation": self.is_simulation,
             "controller": self.controller,
+            "simulation_dds_interface": self._simulation_dds_label(),
             "joint_position_rad": joint_position,
             "joint_velocity_rad_s": joint_velocity,
             "joint_torque_est_nm": joint_torque,
@@ -121,7 +136,11 @@ class UnitreeG1LeRobot(Embodiment):
                 skill="reset",
                 ok=True,
                 detail="Reset Unitree G1 through the native LeRobot reset boundary.",
-                data={"controller": self.controller, "is_simulation": self.is_simulation},
+                data={
+                    "controller": self.controller,
+                    "is_simulation": self.is_simulation,
+                    "simulation_dds_interface": self._simulation_dds_label(),
+                },
             )
 
         if request.name == "stand":
@@ -146,6 +165,30 @@ class UnitreeG1LeRobot(Embodiment):
             raise RuntimeError(f"{self.name} is not connected")
         return self._robot
 
+    def _simulation_dds_label(self) -> str | None:
+        if not self.is_simulation:
+            return None
+        return self.simulation_dds_interface or "auto"
+
+    @staticmethod
+    def _configure_simulation_dds(robot: Any, interface: str | None) -> None:
+        """Override LeRobot's hardcoded simulated ``lo`` argument explicitly.
+
+        UnitreeG1.connect() calls ``self._ChannelFactoryInitialize(0, 'lo')`` in
+        LeRobot v0.6.1. Replacing only that instance attribute keeps physical mode
+        untouched and lets the simulation choose the known-working one-argument
+        Unitree initializer (or an explicitly requested interface).
+        """
+
+        original = robot._ChannelFactoryInitialize
+
+        def initialize(domain_id: int, _upstream_interface: str | None = None) -> Any:
+            if interface is None:
+                return original(domain_id)
+            return original(domain_id, interface)
+
+        robot._ChannelFactoryInitialize = initialize
+
     @staticmethod
     def _load_default_robot_factory() -> NativeRobotFactory:
         try:
@@ -163,6 +206,7 @@ class UnitreeG1LeRobot(Embodiment):
             robot_ip: str,
             gravity_compensation: bool,
             default_positions: tuple[float, ...] | None,
+            simulation_dds_interface: str | None,
         ) -> Any:
             kwargs: dict[str, Any] = {
                 "is_simulation": is_simulation,
@@ -172,6 +216,9 @@ class UnitreeG1LeRobot(Embodiment):
             }
             if default_positions is not None:
                 kwargs["default_positions"] = list(default_positions)
-            return UnitreeG1(UnitreeG1Config(**kwargs))
+            robot = UnitreeG1(UnitreeG1Config(**kwargs))
+            if is_simulation:
+                UnitreeG1LeRobot._configure_simulation_dds(robot, simulation_dds_interface)
+            return robot
 
         return factory
