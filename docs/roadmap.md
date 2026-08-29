@@ -19,6 +19,9 @@
 - [ ] Attach XLeRobot arm/VLA policy before enabling `MANIPULATE`
 - [x] Add policy-backed Microduck MuJoCo adapter with stand/walk/kick/roll skills
 - [x] Smoke-test Microduck against pinned native runtime + official Space policies
+- [x] Add native LeRobot Unitree G1 simulation-capable semantic adapter
+- [ ] Smoke-test the official Hub-hosted Unitree G1 MuJoCo environment in pinned CI
+- [ ] Calibrate G1 normalized locomotion axes before advertising SI-unit `WALK`
 - [ ] Normalize observations
 - [x] Add simulator reset/seed support
 - [ ] Record episode traces
@@ -86,6 +89,9 @@
 - [x] Gate SO-101 `MANIPULATE` behind a named semantic executor and behavior allowlist
 - [ ] Smoke-test `SO101LeRobot` against a physical SO-101 follower
 - [ ] Attach and evaluate a concrete SO-101 LeRobot manipulation policy/behavior executor
+- [x] Add native LeRobot Unitree G1 observation/reset/stand reference adapter
+- [x] Contract-test Unitree G1 assumptions against pinned LeRobot v0.6.1 source
+- [ ] Add a calibrated semantic G1 locomotion executor before exposing `WALK`
 - [ ] Add XLeRobot real adapter
 - [ ] Preserve identical high-level skill API
 - [ ] Add emergency stop / safety state
@@ -101,5 +107,6 @@
 
 ## M6 — Humanoid
 - [ ] Track LeRobot Humanoid upper-body / whole-body progress
-- [ ] Add full simulated humanoid when available
+- [x] Add a second first-party LeRobot humanoid reference through Unitree G1
+- [ ] Add full simulated LeRobot Humanoid when available
 - [ ] Add physical humanoid backend without changing agent-facing API
