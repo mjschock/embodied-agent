@@ -79,12 +79,14 @@ jobs:
             "loguru>=0.7,<1" \
             "msgpack>=1,<2" \
             "msgpack-numpy>=0.4.8,<1" \
-            "pyyaml>=6,<7"
+            "pyyaml>=6,<7" \
+            "scipy>=1.10,<2"
           python - <<'PY'
           import lerobot
+          import scipy
           import unitree_sdk2py
           from lerobot.robots.unitree_g1 import UnitreeG1, UnitreeG1Config
-          print("LeRobot G1 imports OK", UnitreeG1, UnitreeG1Config)
+          print("LeRobot G1 imports OK", UnitreeG1, UnitreeG1Config, "scipy", scipy.__version__)
           PY
       - name: Check out pinned Unitree G1 EnvHub repository
         run: |
