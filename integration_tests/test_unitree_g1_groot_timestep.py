@@ -101,6 +101,9 @@ class UnitreeG1GrootTimestepCharacterizationTests(TestCase):
 
             async def run_episode(label: str, sim_dt_s: float) -> dict[str, Any]:
                 configure_env(sim_dt_s)
+                # Each profile gets a fresh simulator lifecycle. EnvHub's native
+                # reset mutates mjData while its physics thread may be in mj_step(),
+                # so an in-process reset would make this timing A/B itself racy.
                 robot = UnitreeG1LeRobot(
                     name="g1",
                     is_simulation=True,
@@ -108,7 +111,6 @@ class UnitreeG1GrootTimestepCharacterizationTests(TestCase):
                     gravity_compensation=False,
                     simulation_dds_interface=None,
                 )
-                native = None
                 await robot.connect()
                 try:
                     native = robot._robot
@@ -167,8 +169,6 @@ class UnitreeG1GrootTimestepCharacterizationTests(TestCase):
                             await asyncio.sleep(interval_s)
                         return samples
 
-                    reset = await robot.execute("reset")
-                    self.assertTrue(reset.ok, reset.detail)
                     stand = await robot.execute("stand")
                     self.assertTrue(stand.ok, stand.detail)
                     pre = await sample(1.0)
