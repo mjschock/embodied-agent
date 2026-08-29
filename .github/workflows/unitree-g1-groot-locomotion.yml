@@ -1,0 +1,111 @@
+name: unitree-g1-groot-locomotion
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unitree-g1-groot-locomotion:
+    runs-on: ubuntu-latest
+    env:
+      MUJOCO_GL: osmesa
+      PYOPENGL_PLATFORM: osmesa
+      SDL_VIDEODRIVER: dummy
+      PYGAME_HIDE_SUPPORT_PROMPT: "1"
+      PYTHONFAULTHANDLER: "1"
+      MALLOC_CHECK_: "3"
+      CYCLONEDDS_HOME: ${{ github.workspace }}/.vendor/cyclonedds/install
+      LD_LIBRARY_PATH: ${{ github.workspace }}/.vendor/cyclonedds/install/lib
+      GROOT_POLICY_ROOT: ${{ github.workspace }}/.vendor/groot-policies
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: huggingface/lerobot
+          ref: 7e241bd630a3719a56157a497ce5d08f244784f1
+          path: .vendor/lerobot
+      - uses: actions/checkout@v4
+        with:
+          repository: unitreerobotics/unitree_sdk2_python
+          ref: 65691c8a8bc53b98d3976dba4dbf9d5d20b2e7f5
+          path: .vendor/unitree-sdk2-python
+      - uses: actions/checkout@v4
+        with:
+          repository: eclipse-cyclonedds/cyclonedds
+          ref: 9995905bce6c4cf9f740d6438bbf7fcfd1c83dfd
+          path: .vendor/cyclonedds
+      - uses: actions/checkout@v4
+        with:
+          repository: eclipse-cyclonedds/cyclonedds-python
+          ref: 9cec1189a3d5a1407851dfe1f40899dd4a67f52d
+          path: .vendor/cyclonedds-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install system build and OSMesa dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bison \
+            cmake \
+            flex \
+            libosmesa6-dev \
+            ninja-build
+      - name: Build pinned CycloneDDS 0.10.2 for Python 3.12
+        run: |
+          cmake -S .vendor/cyclonedds -B .vendor/cyclonedds/build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="$CYCLONEDDS_HOME" \
+            -DBUILD_DDSPERF=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build .vendor/cyclonedds/build --target install --parallel 2
+          python -m pip install --upgrade pip
+          python -m pip install .vendor/cyclonedds-python
+      - name: Install pinned Unitree SDK and LeRobot runtime
+        run: |
+          python -m pip install "opencv-python-headless>=4.9,<4.14"
+          python -m pip install -e .vendor/unitree-sdk2-python --no-deps
+          python -m pip install \
+            "torch==2.11.0" \
+            "torchvision==0.26.0" \
+            --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".vendor/lerobot[unitree_g1]"
+          python -m pip install -e .
+          python -m pip install \
+            "mujoco>=3,<4" \
+            "loguru>=0.7,<1" \
+            "msgpack>=1,<2" \
+            "msgpack-numpy>=0.4.8,<1" \
+            "pyyaml>=6,<7" \
+            "scipy>=1.10,<2"
+      - name: Check out pinned Unitree G1 EnvHub repository
+        run: |
+          git clone https://huggingface.co/lerobot/unitree-g1-mujoco .vendor/unitree-g1-mujoco
+          git -C .vendor/unitree-g1-mujoco checkout a38dc8617f0fca51b38e9354dc58ee35ad850fb5
+          git -C .vendor/unitree-g1-mujoco lfs pull
+          git -C .vendor/unitree-g1-mujoco rev-parse HEAD
+      - name: Download and verify pinned GR00T balance/walk policies
+        run: |
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+
+          revision = "921bc56492959fa3ed0fb03cecdee14ab768eefc"
+          local_dir = ".vendor/groot-policies"
+          for filename in (
+              "GR00T-WholeBodyControl-Balance.onnx",
+              "GR00T-WholeBodyControl-Walk.onnx",
+          ):
+              path = hf_hub_download(
+                  repo_id="nepyope/GR00T-WholeBodyControl_g1",
+                  filename=filename,
+                  revision=revision,
+                  local_dir=local_dir,
+              )
+              print(filename, path)
+          PY
+          echo "f645da599d4ca3d29ed273c8f4712620bb680d34977469ca3aeabe5bb9631c18  .vendor/groot-policies/GR00T-WholeBodyControl-Balance.onnx" | sha256sum -c -
+          echo "7c82255b6905ffcc4468fa7f8ddcf7b70db168cf1042107ccab887cb6a8e5407  .vendor/groot-policies/GR00T-WholeBodyControl-Walk.onnx" | sha256sum -c -
+      - name: Run untethered normalized locomotion characterization
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+        run: python -m unittest discover -s integration_tests -p "test_unitree_g1_groot_locomotion.py" -v
