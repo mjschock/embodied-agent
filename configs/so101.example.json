@@ -1,0 +1,16 @@
+{
+  "robots": {
+    "so101": {
+      "adapter": "lerobot_so101",
+      "params": {
+        "port": "/dev/tty.usbmodem_REPLACE_ME",
+        "robot_id": "embodied-agent-so101",
+        "calibrate": true,
+        "disable_torque_on_disconnect": true,
+        "max_relative_target": 10.0,
+        "use_degrees": true
+      },
+      "tools": ["observe"]
+    }
+  }
+}
