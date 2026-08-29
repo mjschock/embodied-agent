@@ -23,7 +23,7 @@
 - [x] Smoke-test the official Hub-hosted Unitree G1 MuJoCo environment in pinned CI
 - [x] Smoke-test the full LeRobot Unitree G1 connect/observe/reset/disconnect lifecycle against pinned EnvHub
 - [x] Characterize and regression-test the Python 3.12 Unitree/CycloneDDS explicit-loopback incompatibility
-- [ ] Characterize/fix repeated same-process G1 simulation reconnect lifecycle
+- [x] Characterize/fix repeated same-process G1 simulation reconnect lifecycle
 - [ ] Track/fix upstream G1 EnvHub declared 97-D vs runtime 100-D observation-space mismatch
 - [ ] Calibrate G1 normalized locomotion axes before advertising SI-unit `WALK`
 - [ ] Normalize observations
