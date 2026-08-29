@@ -67,7 +67,8 @@ class UnitreeG1GrootGainCharacterizationTests(TestCase):
             for path in (env_file, config_path, balance_path, walk_path):
                 self.assertTrue(path.exists(), path)
 
-            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            original_config_text = config_path.read_text(encoding="utf-8")
+            config = yaml.safe_load(original_config_text)
             config.update(
                 {
                     "ENABLE_ONSCREEN": False,
@@ -90,20 +91,22 @@ class UnitreeG1GrootGainCharacterizationTests(TestCase):
                 self.assertIn(path, (balance_path, walk_path))
                 return str(path)
 
-            robot = UnitreeG1LeRobot(
-                name="g1",
-                is_simulation=True,
-                controller="GrootLocomotionController",
-                gravity_compensation=False,
-                simulation_dds_interface=None,
-            )
+            differing = np.flatnonzero(
+                LEROBOT_LOWER_BODY_KP != GROOT_REFERENCE_LOWER_BODY_KP
+            ).tolist()
+            self.assertEqual(differing, [3, 9])
 
-            with (
-                patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
-                patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
-                patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
-                patch.object(groot_locomotion, "hf_hub_download", side_effect=pinned_policy_download),
-            ):
+            async def episode(label: str, lower_body_kp: np.ndarray) -> dict[str, Any]:
+                # Avoid EnvHub's unsynchronized native reset while its MuJoCo
+                # thread is stepping. A fresh connection supplies a clean initial
+                # mjData state and PR #42 covers repeated same-process lifecycles.
+                robot = UnitreeG1LeRobot(
+                    name="g1",
+                    is_simulation=True,
+                    controller="GrootLocomotionController",
+                    gravity_compensation=False,
+                    simulation_dds_interface=None,
+                )
                 await robot.connect()
                 try:
                     native = robot._robot
@@ -117,10 +120,8 @@ class UnitreeG1GrootGainCharacterizationTests(TestCase):
                     original_kd = np.asarray(native.kd, dtype=np.float64).copy()
                     self.assertTrue(np.array_equal(original_kp[:15], LEROBOT_LOWER_BODY_KP))
                     self.assertTrue(np.array_equal(original_kd[:15], LOWER_BODY_KD))
-                    differing = np.flatnonzero(
-                        LEROBOT_LOWER_BODY_KP != GROOT_REFERENCE_LOWER_BODY_KP
-                    ).tolist()
-                    self.assertEqual(differing, [3, 9])
+                    native.kp[:15] = lower_body_kp.astype(native.kp.dtype)
+                    native.kd[:15] = LOWER_BODY_KD.astype(native.kd.dtype)
 
                     async def sample(
                         duration_s: float,
@@ -165,128 +166,117 @@ class UnitreeG1GrootGainCharacterizationTests(TestCase):
                             await asyncio.sleep(interval_s)
                         return samples
 
-                    async def episode(label: str, lower_body_kp: np.ndarray) -> dict[str, Any]:
-                        native.kp[:15] = lower_body_kp.astype(native.kp.dtype)
-                        native.kd[:15] = LOWER_BODY_KD.astype(native.kd.dtype)
+                    stand = await robot.execute("stand")
+                    self.assertTrue(stand.ok, stand.detail)
+                    pre = await sample(1.0)
+                    start = pre[-1]
 
-                        reset = await robot.execute("reset")
-                        self.assertTrue(reset.ok, reset.detail)
-                        stand = await robot.execute("stand")
-                        self.assertTrue(stand.ok, stand.detail)
-                        pre = await sample(1.0)
-                        start = pre[-1]
+                    action = dict(REMOTE_ZERO)
+                    action["remote.ly"] = 0.50
+                    native.send_action(action)
+                    moving = await sample(2.0)
+                    end = moving[-1]
+                    steady = moving[10:]
+                    self.assertTrue(steady)
 
-                        action = dict(REMOTE_ZERO)
-                        action["remote.ly"] = 0.50
-                        native.send_action(action)
-                        moving = await sample(2.0)
-                        end = moving[-1]
-                        steady = moving[10:]
-                        self.assertTrue(steady)
+                    self.assertLessEqual(
+                        max(abs(s["remote_ly"] - 0.50) for s in steady),
+                        1e-12,
+                    )
+                    self.assertLessEqual(
+                        max(abs(s["cmd_forward"] - 0.50) for s in steady),
+                        1e-6,
+                    )
+                    for s in steady:
+                        self.assertTrue(np.array_equal(s["lowcmd_kp"], lower_body_kp))
+                        self.assertTrue(np.array_equal(s["lowcmd_kd"], LOWER_BODY_KD))
 
-                        self.assertLessEqual(
-                            max(abs(s["remote_ly"] - 0.50) for s in steady),
-                            1e-12,
-                        )
-                        self.assertLessEqual(
-                            max(abs(s["cmd_forward"] - 0.50) for s in steady),
-                            1e-6,
-                        )
-                        for s in steady:
-                            self.assertTrue(np.array_equal(s["lowcmd_kp"], lower_body_kp))
-                            self.assertTrue(np.array_equal(s["lowcmd_kd"], LOWER_BODY_KD))
+                    stopped = await robot.execute("stand")
+                    self.assertTrue(stopped.ok, stopped.detail)
+                    post = await sample(0.5)
+                    self.assertTrue(np.allclose(native.controller.cmd, np.zeros(3), atol=0.0))
 
-                        stopped = await robot.execute("stand")
-                        self.assertTrue(stopped.ok, stopped.detail)
-                        post = await sample(0.5)
-                        self.assertTrue(np.allclose(native.controller.cmd, np.zeros(3), atol=0.0))
+                    initial_yaw = start["yaw_rad"]
+                    dx = end["x_m"] - start["x_m"]
+                    dy = end["y_m"] - start["y_m"]
+                    forward_m = math.cos(initial_yaw) * dx + math.sin(initial_yaw) * dy
+                    lateral_m = -math.sin(initial_yaw) * dx + math.cos(initial_yaw) * dy
+                    yaw_delta = _wrap_angle(end["yaw_rad"] - initial_yaw)
+                    all_samples = pre + moving + post
+                    body_q = np.asarray([s["body_q"] for s in steady], dtype=np.float64)
+                    body_dq = np.asarray([s["body_dq"] for s in steady], dtype=np.float64)
+                    pre_drift = math.hypot(
+                        pre[-1]["x_m"] - pre[0]["x_m"],
+                        pre[-1]["y_m"] - pre[0]["y_m"],
+                    )
 
-                        initial_yaw = start["yaw_rad"]
-                        dx = end["x_m"] - start["x_m"]
-                        dy = end["y_m"] - start["y_m"]
-                        forward_m = math.cos(initial_yaw) * dx + math.sin(initial_yaw) * dy
-                        lateral_m = -math.sin(initial_yaw) * dx + math.cos(initial_yaw) * dy
-                        yaw_delta = _wrap_angle(end["yaw_rad"] - initial_yaw)
-                        all_samples = pre + moving + post
-                        body_q = np.asarray([s["body_q"] for s in steady], dtype=np.float64)
-                        body_dq = np.asarray([s["body_dq"] for s in steady], dtype=np.float64)
-                        pre_drift = math.hypot(
-                            pre[-1]["x_m"] - pre[0]["x_m"],
-                            pre[-1]["y_m"] - pre[0]["y_m"],
-                        )
-
-                        return {
-                            "gain_profile": label,
-                            "knee_kp": float(lower_body_kp[3]),
-                            "forward_displacement_m": forward_m,
-                            "mean_forward_mps": forward_m / 2.0,
-                            "lateral_displacement_m": lateral_m,
-                            "yaw_delta_rad": yaw_delta,
-                            "pre_drift_m": pre_drift,
-                            "motion_to_pre_drift_ratio": abs(forward_m) / max(pre_drift, 1e-12),
-                            "min_height_m": min(s["z_m"] for s in all_samples),
-                            "max_tilt_rad": max(s["tilt_rad"] for s in all_samples),
-                            "body_q_peak_to_peak_l2_rad": float(
-                                np.linalg.norm(np.ptp(body_q, axis=0))
-                            ),
-                            "body_dq_rms_rad_s": float(np.sqrt(np.mean(np.square(body_dq)))),
-                        }
-
-                    profiles = {
-                        "lerobot_v0.6.1": LEROBOT_LOWER_BODY_KP,
-                        "groot_reference": GROOT_REFERENCE_LOWER_BODY_KP,
+                    return {
+                        "gain_profile": label,
+                        "knee_kp": float(lower_body_kp[3]),
+                        "forward_displacement_m": forward_m,
+                        "mean_forward_mps": forward_m / 2.0,
+                        "lateral_displacement_m": lateral_m,
+                        "yaw_delta_rad": yaw_delta,
+                        "pre_drift_m": pre_drift,
+                        "motion_to_pre_drift_ratio": abs(forward_m) / max(pre_drift, 1e-12),
+                        "min_height_m": min(s["z_m"] for s in all_samples),
+                        "max_tilt_rad": max(s["tilt_rad"] for s in all_samples),
+                        "body_q_peak_to_peak_l2_rad": float(np.linalg.norm(np.ptp(body_q, axis=0))),
+                        "body_dq_rms_rad_s": float(np.sqrt(np.mean(np.square(body_dq)))),
                     }
-                    # Balanced crossover order reduces the chance that asynchronous
-                    # reset/physics phase is mistaken for a gain effect.
-                    order = (
-                        "lerobot_v0.6.1",
-                        "groot_reference",
-                        "groot_reference",
-                        "lerobot_v0.6.1",
-                    )
-                    episodes = [await episode(label, profiles[label]) for label in order]
-
-                    aggregates: dict[str, dict[str, float]] = {}
-                    for label in profiles:
-                        selected = [e for e in episodes if e["gain_profile"] == label]
-                        aggregates[label] = {
-                            "mean_forward_displacement_m": float(
-                                np.mean([e["forward_displacement_m"] for e in selected])
-                            ),
-                            "max_abs_forward_displacement_m": max(
-                                abs(e["forward_displacement_m"]) for e in selected
-                            ),
-                            "mean_pre_drift_m": float(
-                                np.mean([e["pre_drift_m"] for e in selected])
-                            ),
-                            "mean_motion_to_pre_drift_ratio": float(
-                                np.mean([e["motion_to_pre_drift_ratio"] for e in selected])
-                            ),
-                        }
-
-                    print(
-                        "GROOT_GAIN_AB "
-                        + json.dumps(
-                            {"episodes": episodes, "aggregates": aggregates},
-                            sort_keys=True,
-                        ),
-                        flush=True,
-                    )
-
-                    for result in episodes:
-                        numeric = [
-                            value for value in result.values() if isinstance(value, (int, float))
-                        ]
-                        self.assertTrue(all(math.isfinite(float(value)) for value in numeric))
-                        self.assertGreater(result["min_height_m"], 0.2)
-                        self.assertLess(result["max_tilt_rad"], 1.0)
-                        self.assertGreater(result["body_q_peak_to_peak_l2_rad"], 0.1)
                 finally:
-                    native = robot._robot
-                    if native is not None:
-                        native.kp[:] = original_kp.astype(native.kp.dtype)
-                        native.kd[:] = original_kd.astype(native.kd.dtype)
                     await robot.disconnect()
+
+            profiles = {
+                "lerobot_v0.6.1": LEROBOT_LOWER_BODY_KP,
+                "groot_reference": GROOT_REFERENCE_LOWER_BODY_KP,
+            }
+            order = (
+                "lerobot_v0.6.1",
+                "groot_reference",
+                "groot_reference",
+                "lerobot_v0.6.1",
+            )
+
+            try:
+                with (
+                    patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
+                    patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
+                    patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
+                    patch.object(groot_locomotion, "hf_hub_download", side_effect=pinned_policy_download),
+                ):
+                    episodes = [await episode(label, profiles[label]) for label in order]
+            finally:
+                config_path.write_text(original_config_text, encoding="utf-8")
+
+            aggregates: dict[str, dict[str, float]] = {}
+            for label in profiles:
+                selected = [e for e in episodes if e["gain_profile"] == label]
+                aggregates[label] = {
+                    "mean_forward_displacement_m": float(
+                        np.mean([e["forward_displacement_m"] for e in selected])
+                    ),
+                    "max_abs_forward_displacement_m": max(
+                        abs(e["forward_displacement_m"]) for e in selected
+                    ),
+                    "mean_pre_drift_m": float(np.mean([e["pre_drift_m"] for e in selected])),
+                    "mean_motion_to_pre_drift_ratio": float(
+                        np.mean([e["motion_to_pre_drift_ratio"] for e in selected])
+                    ),
+                }
+
+            print(
+                "GROOT_GAIN_AB "
+                + json.dumps({"episodes": episodes, "aggregates": aggregates}, sort_keys=True),
+                flush=True,
+            )
+
+            for result in episodes:
+                numeric = [value for value in result.values() if isinstance(value, (int, float))]
+                self.assertTrue(all(math.isfinite(float(value)) for value in numeric))
+                self.assertGreater(result["min_height_m"], 0.2)
+                self.assertLess(result["max_tilt_rad"], 1.0)
+                self.assertGreater(result["body_q_peak_to_peak_l2_rad"], 0.1)
 
         asyncio.run(scenario())
 
