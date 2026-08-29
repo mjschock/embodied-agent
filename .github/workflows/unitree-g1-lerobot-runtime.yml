@@ -13,6 +13,8 @@ jobs:
       PYOPENGL_PLATFORM: osmesa
       SDL_VIDEODRIVER: dummy
       PYGAME_HIDE_SUPPORT_PROMPT: "1"
+      PYTHONFAULTHANDLER: "1"
+      MALLOC_CHECK_: "3"
       CYCLONEDDS_HOME: ${{ github.workspace }}/.vendor/cyclonedds/install
       LD_LIBRARY_PATH: ${{ github.workspace }}/.vendor/cyclonedds/install/lib
     steps:
@@ -90,6 +92,79 @@ jobs:
           git -C .vendor/unitree-g1-mujoco checkout a38dc8617f0fca51b38e9354dc58ee35ad850fb5
           git -C .vendor/unitree-g1-mujoco lfs pull
           git -C .vendor/unitree-g1-mujoco rev-parse HEAD
+      - name: Probe CycloneDDS loopback domain
+        run: |
+          python - <<'PY'
+          from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+          print("before ChannelFactoryInitialize", flush=True)
+          ChannelFactoryInitialize(0, "lo")
+          print("after ChannelFactoryInitialize", flush=True)
+          PY
+      - name: Probe Unitree G1 DDS topic construction
+        run: |
+          python - <<'PY'
+          from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelPublisher, ChannelSubscriber
+          from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_, LowState_
+
+          print("before DDS init", flush=True)
+          ChannelFactoryInitialize(0, "lo")
+          print("before lowcmd publisher", flush=True)
+          publisher = ChannelPublisher("rt/lowcmd", LowCmd_)
+          publisher.Init()
+          print("before lowstate subscriber", flush=True)
+          subscriber = ChannelSubscriber("rt/lowstate", LowState_)
+          subscriber.Init()
+          print("DDS topics initialized", flush=True)
+          subscriber.Close()
+          publisher.Close()
+          PY
+      - name: Probe LeRobot Unitree G1 construction
+        run: |
+          python - <<'PY'
+          from lerobot.robots.unitree_g1 import UnitreeG1, UnitreeG1Config
+
+          print("before UnitreeG1 construction", flush=True)
+          native = UnitreeG1(UnitreeG1Config(is_simulation=True, controller=None))
+          print("after UnitreeG1 construction", native, flush=True)
+          PY
+      - name: Probe LeRobot EnvHub loader
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from unittest.mock import patch
+
+          import huggingface_hub
+          import yaml
+          import lerobot.envs.utils as env_utils
+          from lerobot.envs import make_env
+
+          root = Path(os.environ["UNITREE_G1_ENV_ROOT"]).resolve()
+          env_file = root / "env.py"
+          config_path = root / "config.yaml"
+          config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+          config.update({
+              "ENABLE_ONSCREEN": False,
+              "ENABLE_OFFSCREEN": False,
+              "USE_JOYSTICK": 0,
+              "PRINT_SCENE_INFORMATION": False,
+          })
+          config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+          print("before make_env", flush=True)
+          with (
+              patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
+              patch.object(env_utils, "snapshot_download", return_value=str(root)),
+              patch.object(huggingface_hub, "snapshot_download", return_value=str(root)),
+          ):
+              wrapper = make_env("lerobot/unitree-g1-mujoco", trust_remote_code=True)
+              print("after make_env", flush=True)
+              env = wrapper["hub_env"][0].envs[0]
+              env.close()
+          print("after EnvHub close", flush=True)
+          PY
       - name: Run full LeRobot G1 simulation lifecycle smoke
         env:
           UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
