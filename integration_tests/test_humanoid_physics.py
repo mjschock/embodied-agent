@@ -8,6 +8,7 @@ import unittest
 
 from embodied_agent.core import Capability
 from embodied_agent.embodiments import HumanoidMuJoCo
+from embodied_agent.evals.reproducibility import benchmark_reproducibility
 from embodied_agent.evals.skill_metrics import SkillProbe, benchmark_robot_skills
 
 
@@ -122,6 +123,52 @@ class HumanoidPhysicsIntegrationTests(unittest.TestCase):
             self.assertEqual(result.metrics[0].successes, 5)
             self.assertEqual(result.metrics[1].attempts, 3)
             self.assertEqual(result.metrics[1].successes, 3)
+
+        asyncio.run(scenario())
+
+    def test_fixed_base_reset_and_stand_joint_state_are_reproducible(self) -> None:
+        async def scenario() -> None:
+            runtime_root = os.environ.get("LEROBOT_HUMANOID_RUNTIME_ROOT")
+            self.assertTrue(
+                runtime_root,
+                "LEROBOT_HUMANOID_RUNTIME_ROOT must point to the pinned official runtime checkout",
+            )
+            robot = HumanoidMuJoCo(
+                runtime_root=runtime_root,
+                control_hz=100.0,
+                fixed_base=True,
+            )
+
+            await robot.connect()
+            try:
+                await asyncio.sleep(0.05)
+
+                async def run_episode(_: int):
+                    reset = await robot.execute("reset")
+                    self.assertTrue(reset.ok, reset.detail)
+                    stand = await robot.execute("stand")
+                    self.assertTrue(stand.ok, stand.detail)
+                    observation = await robot.observe()
+                    return {
+                        "reset_joint_position_rad": reset.data["joint_position_rad"],
+                        "stand_joint_position_rad": stand.data["joint_position_rad"],
+                        "observed_joint_position_rad": observation.state["joint_position_rad"],
+                        "fixed_base": bool(observation.state["fixed_base"]),
+                        "policy_active": bool(stand.data["policy_active"]),
+                    }
+
+                result = await benchmark_reproducibility(
+                    run_episode,
+                    attempts=3,
+                    atol=1e-8,
+                    label="humanoid-fixed-base-reset-stand",
+                )
+            finally:
+                await robot.disconnect()
+
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+            self.assertEqual(result.reproducibility_rate, 1.0, result.to_dict())
+            self.assertTrue(all(sample.matches_baseline for sample in result.samples))
 
         asyncio.run(scenario())
 
