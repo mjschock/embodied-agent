@@ -116,3 +116,51 @@ jobs:
         env:
           UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
         run: python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_preprocessing.py" -v
+      - name: Run GR00T knee-gain A/B characterization
+        id: gain_ab
+        timeout-minutes: 3
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+          GROOT_GAIN_RESULT: ${{ runner.temp }}/groot_gain_ab_result.json
+        run: |
+          set -o pipefail
+          python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_gains.py" -v \
+            | tee "$RUNNER_TEMP/groot_gain_ab.log"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          log = Path(os.environ["RUNNER_TEMP"]) / "groot_gain_ab.log"
+          prefix = "GROOT_GAIN_AB "
+          matches = [line[len(prefix):] for line in log.read_text().splitlines() if line.startswith(prefix)]
+          if len(matches) != 1:
+              raise SystemExit(f"expected exactly one {prefix.strip()} record, found {len(matches)}")
+          payload = json.loads(matches[0])
+          Path(os.environ["GROOT_GAIN_RESULT"]).write_text(
+              json.dumps(payload, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          aggregates = payload["aggregates"]
+          stock = aggregates["lerobot_v0.6.1"]
+          reference = aggregates["groot_reference"]
+          outputs = {
+              "stock_fwd": stock["mean_forward_displacement_m"],
+              "ref_fwd": reference["mean_forward_displacement_m"],
+              "stock_drift": stock["mean_pre_drift_m"],
+              "ref_drift": reference["mean_pre_drift_m"],
+              "stock_ratio": stock["mean_motion_to_pre_drift_ratio"],
+              "ref_ratio": reference["mean_motion_to_pre_drift_ratio"],
+          }
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              for key, value in outputs.items():
+                  handle.write(f"{key}={float(value):.6f}\n")
+          PY
+      - name: Upload GR00T knee-gain evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: >-
+            groot-gain-ab_stock-fwd-${{ steps.gain_ab.outputs.stock_fwd }}_ref-fwd-${{ steps.gain_ab.outputs.ref_fwd }}_stock-drift-${{ steps.gain_ab.outputs.stock_drift }}_ref-drift-${{ steps.gain_ab.outputs.ref_drift }}_stock-ratio-${{ steps.gain_ab.outputs.stock_ratio }}_ref-ratio-${{ steps.gain_ab.outputs.ref_ratio }}
+          path: ${{ runner.temp }}/groot_gain_ab_result.json
+          if-no-files-found: error
+          retention-days: 7
