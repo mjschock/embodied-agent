@@ -143,7 +143,7 @@ This establishes the full LeRobot/DDS/EnvHub lifecycle independently from GR00T 
 
 ## Pinned GR00T semantic stand evidence
 
-The dedicated `unitree-g1-groot-stand` workflow proves the controller-backed semantic `STAND` path through the real LeRobot/Unitree/DDS/EnvHub stack. Its validated executable head is `610e6c1101148b6b066e10a6b9fcc25b29a02ab5`.
+The dedicated `unitree-g1-groot-stand` workflow proves the controller-backed semantic `STAND` path through the real LeRobot/Unitree/DDS/EnvHub stack. Its initial validated executable head is `610e6c1101148b6b066e10a6b9fcc25b29a02ab5`.
 
 In addition to the runtime pins above, it pins `nepyope/GR00T-WholeBodyControl_g1` at `921bc56492959fa3ed0fb03cecdee14ab768eefc` and verifies SHA-256 for both the balance and walk ONNX assets before LeRobot loads them. The test invokes `UnitreeG1LeRobot.execute("stand")`, confirms all four normalized remote axes remain exactly zero, and samples 100 simulator observations over two seconds.
 
@@ -162,6 +162,36 @@ controller_output_joints   15
 ```
 
 All sampled joint states and controller outputs were finite. CI deliberately does **not** require bit-for-bit zero tilt: the behavioral gate allows `< 0.05 rad` (about 2.9 degrees) for both maximum and final roll/pitch tilt. This leaves a small physical tolerance while still failing a materially unstable standing episode.
+
+### Stand reliability and reset-conditioned reproducibility
+
+Executable evidence head `a8fc9014014d139a61e331d07b55c144adf3ef74` extends the same pinned GR00T/EnvHub gate with repeated semantic-skill measurement. All 12 required project workflows passed on that exact code-bearing head.
+
+Five reset-conditioned `stand` attempts all succeeded, and every postcondition sample remained at `0.0 rad` maximum and final roll/pitch tilt. The semantic call latency measured:
+
+```text
+success_rate              1.0 (5/5)
+mean_latency_ms           1.5291664
+p50_latency_ms            0.7275590
+p95_latency_ms            3.1140846
+max_latency_ms            3.2118230
+```
+
+Reset and the approximately 0.5-second behavioral postcondition window are deliberately outside the timed interval, so these numbers measure the semantic `stand` request itself rather than simulator settling time.
+
+The same connected native stack then ran three `reset -> stand` episodes through the shared reproducibility metric at `atol=1e-9`. The reproducibility contract is intentionally behavioral and semantic:
+
+- all four normalized remote axes remain exactly zero;
+- the GR00T controller command remains zero;
+- all 15 lower-body controller outputs are present and finite;
+- all 29 observed joint position/velocity fields are present and finite;
+- maximum and final roll/pitch tilt remain within the standing envelope.
+
+The result was `reproducibility_rate = 1.0`, `max_abs_error = 0.0`, with no mismatch paths across the two baseline comparisons.
+
+A deliberately stricter diagnostic first compared the instantaneous values of all 29 joint positions/velocities and the 15 controller outputs across reset episodes. That hypothesis was falsified: wall-clock snapshots diverged by as much as about `9.65`, despite exact zero command and `0.0 rad` tilt in every episode. LeRobot controller inference and EnvHub physics advance on asynchronous background threads, so those instantaneous state values are phase-sensitive. The project did **not** relax the numerical tolerance to make that probe pass; instead, those fields remain checked for shape and finiteness while reproducibility is claimed only for the semantic/behavioral boundary that the simulator demonstrates.
+
+The strict diagnostic also exposed a native EnvHub simulator-thread/quaternion exception when repeatedly disconnecting and reconnecting the full G1 stack inside one Python process. The validated metric gate therefore uses one native lifecycle with repeated `reset()` episodes, matching the intended episode model. Repeated same-process reconnect remains a separate lifecycle issue to characterize rather than being hidden inside the reproducibility metric.
 
 This evidence is simulation-only. It proves GR00T balance/standing through the semantic G1 boundary, not physical G1 execution and not calibrated locomotion.
 
@@ -194,7 +224,7 @@ The `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobo
 - controller reset on robot reset;
 - GR00T balance-policy selection for near-zero commands.
 
-Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter. The GR00T stand workflow then proves that the agent-facing semantic `stand` call reaches the pinned balance policy and remains upright within the bounded roll/pitch envelope.
+Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter. The GR00T stand workflow then proves that the agent-facing semantic `stand` call reaches the pinned balance policy, remains upright within the bounded roll/pitch envelope, and meets the recorded reliability/reproducibility contract.
 
 ## Not yet proven
 
