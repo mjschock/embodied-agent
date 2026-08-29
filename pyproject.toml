@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "embodied-agent"
 version = "0.1.0"
-description = "Simulation-first multi-embodiment agent platform for XLeRobot, Crazyflie, Microduck, LeRobot Humanoid, and SO-101"
+description = "Simulation-first multi-embodiment agent platform for XLeRobot, Crazyflie, Microduck, LeRobot Humanoid, SO-101, and Unitree G1"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
@@ -25,6 +25,7 @@ humanoid-sim = ["mujoco>=3,<4", "numpy>=2.0"]
 microduck-sim = ["mujoco>=3,<4", "numpy>=2.0", "onnxruntime>=1.24.4,<2"]
 xlerobot-sim = ["mujoco>=3,<4", "numpy>=2.0"]
 so101 = ["lerobot[feetech]>=0.6.1,<0.7"]
+unitree-g1 = ["lerobot[unitree_g1]>=0.6.1,<0.7"]
 mcp = ["mcp>=2,<3"]
 openai-agent = ["mcp>=2,<3", "openai>=3,<4"]
 dev = ["numpy>=2.0", "mcp>=2,<3", "openai>=3,<4"]
