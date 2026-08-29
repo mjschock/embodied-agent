@@ -63,11 +63,13 @@ class UnitreeG1EnvHubPhysicsTests(unittest.TestCase):
         try:
             self.assertEqual(env.action_space.shape, (29,))
 
-            # The pinned EnvHub revision declares 29 * 3 + 10 = 97 values, but its
-            # current simulator state contains 30 q/dq/tau entries and therefore
-            # reset()/step() return 100 values. Keep both sides explicit so a future
-            # upstream correction becomes a visible contract change rather than a
-            # silent tolerance in our physics gate.
+            # The pinned EnvHub revision declares 29 * 3 + 10 = 97 values. Its
+            # simulator actually reports six floating-base acceleration values,
+            # while env.py concatenates the whole acceleration vector after budgeting
+            # only three values in observation_space. That yields 87 joint values +
+            # quaternion(4) + base velocity(3) + base acceleration(6) = 100.
+            # Keep both sides explicit so an upstream correction becomes a visible
+            # contract change rather than a silent tolerance in our physics gate.
             self.assertEqual(env.observation_space.shape, (97,))
 
             observation, info = env.reset(seed=123)
@@ -87,12 +89,12 @@ class UnitreeG1EnvHubPhysicsTests(unittest.TestCase):
             self.assertEqual(
                 component_lengths,
                 {
-                    "body_q": 30,
-                    "body_dq": 30,
-                    "body_tau_est": 30,
+                    "body_q": 29,
+                    "body_dq": 29,
+                    "body_tau_est": 29,
                     "floating_base_pose": 7,
                     "floating_base_vel": 6,
-                    "floating_base_acc": 3,
+                    "floating_base_acc": 6,
                 },
             )
             self.assertEqual(observation.shape, (100,))
