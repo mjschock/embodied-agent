@@ -1,0 +1,174 @@
+name: unitree-g1-lerobot-runtime
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unitree-g1-lerobot-runtime:
+    runs-on: ubuntu-latest
+    env:
+      MUJOCO_GL: osmesa
+      PYOPENGL_PLATFORM: osmesa
+      SDL_VIDEODRIVER: dummy
+      PYGAME_HIDE_SUPPORT_PROMPT: "1"
+      PYTHONFAULTHANDLER: "1"
+      MALLOC_CHECK_: "3"
+      CYCLONEDDS_HOME: ${{ github.workspace }}/.vendor/cyclonedds/install
+      LD_LIBRARY_PATH: ${{ github.workspace }}/.vendor/cyclonedds/install/lib
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: huggingface/lerobot
+          ref: 7e241bd630a3719a56157a497ce5d08f244784f1
+          path: .vendor/lerobot
+      - uses: actions/checkout@v4
+        with:
+          repository: unitreerobotics/unitree_sdk2_python
+          ref: 65691c8a8bc53b98d3976dba4dbf9d5d20b2e7f5
+          path: .vendor/unitree-sdk2-python
+      - uses: actions/checkout@v4
+        with:
+          repository: eclipse-cyclonedds/cyclonedds
+          ref: 9995905bce6c4cf9f740d6438bbf7fcfd1c83dfd
+          path: .vendor/cyclonedds
+      - uses: actions/checkout@v4
+        with:
+          repository: eclipse-cyclonedds/cyclonedds-python
+          ref: 9cec1189a3d5a1407851dfe1f40899dd4a67f52d
+          path: .vendor/cyclonedds-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install system build and OSMesa dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bison \
+            cmake \
+            flex \
+            libosmesa6-dev \
+            ninja-build
+      - name: Build pinned CycloneDDS 0.10.2 for Python 3.12
+        run: |
+          cmake -S .vendor/cyclonedds -B .vendor/cyclonedds/build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="$CYCLONEDDS_HOME" \
+            -DBUILD_DDSPERF=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build .vendor/cyclonedds/build --target install --parallel 2
+          python -m pip install --upgrade pip
+          python -m pip install .vendor/cyclonedds-python
+          python - <<'PY'
+          import cyclonedds
+          print("cyclonedds Python import OK", cyclonedds.__file__)
+          PY
+      - name: Install pinned Unitree SDK and LeRobot runtime
+        run: |
+          python -m pip install "opencv-python-headless>=4.9,<4.14"
+          python -m pip install -e .vendor/unitree-sdk2-python --no-deps
+          python -m pip install \
+            "torch==2.11.0" \
+            "torchvision==0.26.0" \
+            --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".vendor/lerobot[unitree_g1]"
+          python -m pip install -e .
+          python -m pip install \
+            "mujoco>=3,<4" \
+            "loguru>=0.7,<1" \
+            "msgpack>=1,<2" \
+            "msgpack-numpy>=0.4.8,<1" \
+            "pyyaml>=6,<7" \
+            "scipy>=1.10,<2"
+          python - <<'PY'
+          import lerobot
+          import scipy
+          import unitree_sdk2py
+          from lerobot.robots.unitree_g1 import UnitreeG1, UnitreeG1Config
+          print("LeRobot G1 imports OK", UnitreeG1, UnitreeG1Config, "scipy", scipy.__version__)
+          PY
+      - name: Check out pinned Unitree G1 EnvHub repository
+        run: |
+          git clone https://huggingface.co/lerobot/unitree-g1-mujoco .vendor/unitree-g1-mujoco
+          git -C .vendor/unitree-g1-mujoco checkout a38dc8617f0fca51b38e9354dc58ee35ad850fb5
+          git -C .vendor/unitree-g1-mujoco lfs pull
+          git -C .vendor/unitree-g1-mujoco rev-parse HEAD
+      - name: Probe supported Unitree auto-interface DDS domain
+        run: |
+          python - <<'PY'
+          from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+          print("before ChannelFactoryInitialize(0)", flush=True)
+          ChannelFactoryInitialize(0)
+          print("after ChannelFactoryInitialize(0)", flush=True)
+          PY
+      - name: Probe Unitree G1 DDS topic construction
+        run: |
+          python - <<'PY'
+          from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelPublisher, ChannelSubscriber
+          from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_, LowState_
+
+          print("before DDS init", flush=True)
+          ChannelFactoryInitialize(0)
+          print("before lowcmd publisher", flush=True)
+          publisher = ChannelPublisher("rt/lowcmd", LowCmd_)
+          publisher.Init()
+          print("before lowstate subscriber", flush=True)
+          subscriber = ChannelSubscriber("rt/lowstate", LowState_)
+          subscriber.Init()
+          print("DDS topics initialized", flush=True)
+          subscriber.Close()
+          publisher.Close()
+          PY
+      - name: Probe LeRobot Unitree G1 construction
+        run: |
+          python - <<'PY'
+          from lerobot.robots.unitree_g1 import UnitreeG1, UnitreeG1Config
+
+          print("before UnitreeG1 construction", flush=True)
+          native = UnitreeG1(UnitreeG1Config(is_simulation=True, controller=None))
+          print("after UnitreeG1 construction", native, flush=True)
+          PY
+      - name: Probe LeRobot EnvHub loader on auto-interface DDS
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from unittest.mock import patch
+
+          import huggingface_hub
+          import yaml
+          import lerobot.envs.utils as env_utils
+          from lerobot.envs import make_env
+
+          root = Path(os.environ["UNITREE_G1_ENV_ROOT"]).resolve()
+          env_file = root / "env.py"
+          config_path = root / "config.yaml"
+          config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+          config.update({
+              "ENABLE_ONSCREEN": False,
+              "ENABLE_OFFSCREEN": False,
+              "USE_JOYSTICK": 0,
+              "PRINT_SCENE_INFORMATION": False,
+              "INTERFACE": None,
+          })
+          config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+          print("before make_env", flush=True)
+          with (
+              patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
+              patch.object(env_utils, "snapshot_download", return_value=str(root)),
+              patch.object(huggingface_hub, "snapshot_download", return_value=str(root)),
+          ):
+              wrapper = make_env("lerobot/unitree-g1-mujoco", trust_remote_code=True)
+              print("after make_env", flush=True)
+              env = wrapper["hub_env"][0].envs[0]
+              env.close()
+          print("after EnvHub close", flush=True)
+          PY
+      - name: Run full LeRobot G1 simulation lifecycle smoke
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+        run: python -m unittest discover -s integration_tests -p "test_unitree_g1_lerobot_runtime.py" -v

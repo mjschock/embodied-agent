@@ -1,0 +1,88 @@
+name: unitree-g1-dds-contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unitree-g1-dds-contract:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONFAULTHANDLER: "1"
+      MALLOC_CHECK_: "3"
+      CYCLONEDDS_HOME: ${{ github.workspace }}/.vendor/cyclonedds/install
+      LD_LIBRARY_PATH: ${{ github.workspace }}/.vendor/cyclonedds/install/lib
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: unitreerobotics/unitree_sdk2_python
+          ref: 65691c8a8bc53b98d3976dba4dbf9d5d20b2e7f5
+          path: .vendor/unitree-sdk2-python
+      - uses: actions/checkout@v4
+        with:
+          repository: eclipse-cyclonedds/cyclonedds
+          ref: 9995905bce6c4cf9f740d6438bbf7fcfd1c83dfd
+          path: .vendor/cyclonedds
+      - uses: actions/checkout@v4
+        with:
+          repository: eclipse-cyclonedds/cyclonedds-python
+          ref: 9cec1189a3d5a1407851dfe1f40899dd4a67f52d
+          path: .vendor/cyclonedds-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build pinned CycloneDDS 0.10.2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bison cmake flex ninja-build
+          cmake -S .vendor/cyclonedds -B .vendor/cyclonedds/build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="$CYCLONEDDS_HOME" \
+            -DBUILD_DDSPERF=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build .vendor/cyclonedds/build --target install --parallel 2
+          python -m pip install --upgrade pip
+          python -m pip install .vendor/cyclonedds-python
+          python -m pip install -e .vendor/unitree-sdk2-python --no-deps
+      - name: Probe raw CycloneDDS default domain
+        id: raw_domain
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from cyclonedds.domain import Domain
+          print("before Domain(0)", flush=True)
+          domain = Domain(0)
+          print("after Domain(0)", domain, flush=True)
+          PY
+      - name: Probe Unitree auto-detected DDS config
+        id: auto_domain
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+          print("before ChannelFactoryInitialize(0)", flush=True)
+          ChannelFactoryInitialize(0)
+          print("after ChannelFactoryInitialize(0)", flush=True)
+          PY
+      - name: Probe known-bad explicit loopback DDS config
+        id: loopback_domain
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+          print("before ChannelFactoryInitialize(0, 'lo')", flush=True)
+          ChannelFactoryInitialize(0, "lo")
+          print("after ChannelFactoryInitialize(0, 'lo')", flush=True)
+          PY
+      - name: Assert supported and known-incompatible DDS paths
+        if: always()
+        run: |
+          echo "raw_domain=${{ steps.raw_domain.outcome }}"
+          echo "auto_domain=${{ steps.auto_domain.outcome }}"
+          echo "loopback_domain=${{ steps.loopback_domain.outcome }}"
+          test "${{ steps.raw_domain.outcome }}" = "success"
+          test "${{ steps.auto_domain.outcome }}" = "success"
+          # Unitree SDK2 + CycloneDDS 0.10.2 on Python 3.12 currently aborts
+          # in dds_create_domain when the SDK supplies its explicit `lo` XML.
+          # Keep this negative contract so an upstream behavior change is visible.
+          test "${{ steps.loopback_domain.outcome }}" = "failure"

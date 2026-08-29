@@ -64,7 +64,8 @@ A non-empty joint-position observation must contain all 29 joints.
       "params": {
         "is_simulation": true,
         "controller": "GrootLocomotionController",
-        "gravity_compensation": false
+        "gravity_compensation": false,
+        "simulation_dds_interface": null
       },
       "tools": ["observe", "reset", "stand"]
     }
@@ -72,9 +73,11 @@ A non-empty joint-position observation must contain all 29 joints.
 }
 ```
 
+For simulation, `simulation_dds_interface: null` means Unitree SDK2 interface auto-detection. This is intentional for the pinned Python 3.12 runtime; see the DDS compatibility evidence below. Physical G1 initialization is not modified by this setting.
+
 ## Pinned EnvHub physics evidence
 
-The dedicated `unitree-g1-physics` workflow now launches and steps the official Hub-hosted MuJoCo environment headlessly. It pins:
+The dedicated `unitree-g1-physics` workflow launches and steps the official Hub-hosted MuJoCo environment headlessly. It pins:
 
 - EnvHub `lerobot/unitree-g1-mujoco` at `a38dc8617f0fca51b38e9354dc58ee35ad850fb5`;
 - official `unitreerobotics/unitree_sdk2_python` source at `65691c8a8bc53b98d3976dba4dbf9d5d20b2e7f5`;
@@ -83,7 +86,7 @@ The dedicated `unitree-g1-physics` workflow now launches and steps the official 
 
 The smoke performs a real reset with seed 123 and five zero-action physics steps. Every returned observation must be finite, reward remains zero, and the environment must remain non-terminated/non-truncated.
 
-### Runtime issues discovered by the probe
+### Runtime issues discovered by the physics probe
 
 The diagnostic bring-up found two setup issues before physics could run:
 
@@ -109,6 +112,53 @@ floating_base_acc    6
 
 The environment concatenates 29 position + 29 velocity + 29 torque values, the first 4 pose values, the first 3 velocity values, and all 6 acceleration values: `87 + 4 + 3 + 6 = 100`. Its declared observation space budgets only 3 acceleration values. The test intentionally asserts both the declared `(97,)` space and the actual `(100,)` runtime result so an upstream correction becomes visible instead of silently changing our evidence.
 
+## Full LeRobot lifecycle evidence
+
+The separate `unitree-g1-lerobot-runtime` workflow exercises the adapter's **real default LeRobot factory**, rather than constructing the EnvHub environment directly. Its executable evidence head is `d34eefcb3698535a3a6a04770da76e6d8ec7f014`.
+
+The workflow pins:
+
+- LeRobot v0.6.1 at `7e241bd630a3719a56157a497ce5d08f244784f1`;
+- Unitree SDK2 Python at `65691c8a8bc53b98d3976dba4dbf9d5d20b2e7f5`;
+- CycloneDDS C 0.10.2 at `9995905bce6c4cf9f740d6438bbf7fcfd1c83dfd`;
+- CycloneDDS Python 0.10.2 at `9cec1189a3d5a1407851dfe1f40899dd4a67f52d`;
+- the official G1 EnvHub simulator at `a38dc8617f0fca51b38e9354dc58ee35ad850fb5`;
+- SciPy `>=1.10,<2`, matching the independent EnvHub physics gate because the simulator's Unitree bridge imports `scipy.spatial.transform` directly.
+
+On Python 3.12, it passes:
+
+```text
+Unitree auto-interface DDS domain
+-> Unitree lowcmd/lowstate topic construction
+-> LeRobot UnitreeG1 construction
+-> LeRobot EnvHub loader
+-> UnitreeG1LeRobot.connect()
+-> observe 29 q/dq/tau joints + finite IMU state
+-> native reset()
+-> observe again
+-> disconnect()
+```
+
+This establishes the full LeRobot/DDS/EnvHub lifecycle independently from GR00T policy loading.
+
+### DDS compatibility defect and simulation-only workaround
+
+The first full-runtime attempt exposed a native `*** buffer overflow detected ***` abort inside `dds_create_domain` when pinned LeRobot v0.6.1 called Unitree SDK2 as:
+
+```text
+ChannelFactoryInitialize(0, "lo")
+```
+
+A dedicated `unitree-g1-dds-contract` workflow reduced the issue to three process-level probes on the same Python 3.12 / CycloneDDS 0.10.2 stack:
+
+- raw CycloneDDS `Domain(0)`: **passes**;
+- Unitree `ChannelFactoryInitialize(0)` with interface auto-detection: **passes**;
+- Unitree `ChannelFactoryInitialize(0, "lo")` using its explicit loopback XML: **native aborts**.
+
+Therefore the project does not replace CycloneDDS or weaken the G1 lifecycle test. Instead, `UnitreeG1LeRobot` explicitly overrides only the **simulated** LeRobot instance's hardcoded `"lo"` initialization so `simulation_dds_interface=None` calls the working one-argument Unitree initializer. The pinned EnvHub config is likewise set to interface auto-detection, keeping both ends on DDS domain 0. Physical G1 initialization remains untouched.
+
+The negative `"lo"` probe stays in CI as an expected incompatibility. If a future Unitree/CycloneDDS update fixes that path, the contract will change visibly rather than leaving an undocumented workaround behind.
+
 ## CI evidence
 
 The `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobot v0.6.1 source assumptions:
@@ -120,11 +170,10 @@ The `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobo
 - controller reset on robot reset;
 - GR00T balance-policy selection for near-zero commands.
 
-Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly without implying that the full LeRobot/GR00T controller stack has been executed.
+Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter with controller loading disabled.
 
 ## Not yet proven
 
-- full LeRobot v0.6.1 `UnitreeG1.connect()` against the pinned EnvHub simulator;
 - GR00T balance/standing policy execution through `UnitreeG1LeRobot`;
 - locomotion-axis calibration to physical m/s and rad/s;
 - G1 `WALK` capability through the common semantic API;

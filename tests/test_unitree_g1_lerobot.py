@@ -51,6 +51,15 @@ class FakeNativeG1:
         return dict(action)
 
 
+class FakeDDSNative:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, ...]] = []
+        self._ChannelFactoryInitialize = self._initialize
+
+    def _initialize(self, *args: Any) -> None:
+        self.calls.append(tuple(args))
+
+
 class UnitreeG1LeRobotTests(unittest.TestCase):
     @staticmethod
     def _factory(native: FakeNativeG1):
@@ -70,6 +79,7 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
                 self.assertEqual(observation.state["backend"], "lerobot-unitree-g1")
                 self.assertTrue(observation.state["is_simulation"])
                 self.assertIsNone(observation.state["controller"])
+                self.assertEqual(observation.state["simulation_dds_interface"], "auto")
                 self.assertEqual(len(observation.state["joint_position_rad"]), 29)
                 self.assertEqual(len(observation.state["joint_velocity_rad_s"]), 29)
                 self.assertEqual(len(observation.state["joint_torque_est_nm"]), 29)
@@ -92,6 +102,7 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
             try:
                 result = await robot.execute("reset")
                 self.assertTrue(result.ok)
+                self.assertEqual(result.data["simulation_dds_interface"], "auto")
                 self.assertEqual(native.reset_count, 1)
                 self.assertEqual(native.actions, [])
             finally:
@@ -137,6 +148,17 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_simulation_dds_compatibility_overrides_upstream_hardcoded_interface(self) -> None:
+        auto = FakeDDSNative()
+        UnitreeG1LeRobot._configure_simulation_dds(auto, None)
+        auto._ChannelFactoryInitialize(0, "lo")
+        self.assertEqual(auto.calls, [(0,)])
+
+        explicit = FakeDDSNative()
+        UnitreeG1LeRobot._configure_simulation_dds(explicit, "eth0")
+        explicit._ChannelFactoryInitialize(0, "lo")
+        self.assertEqual(explicit.calls, [(0, "eth0")])
+
     def test_router_hides_stand_without_controller_and_exposes_it_with_controller(self) -> None:
         native = FakeNativeG1()
         observation_only = UnitreeG1LeRobot(name="g1", robot_factory=self._factory(native))
@@ -172,6 +194,7 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
                         "params": {
                             "is_simulation": True,
                             "controller": "GrootLocomotionController",
+                            "simulation_dds_interface": None,
                         },
                     }
                 }
@@ -181,11 +204,14 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
         self.assertIsInstance(robot, UnitreeG1LeRobot)
         self.assertTrue(robot.is_simulation)
         self.assertEqual(robot.controller, "GrootLocomotionController")
+        self.assertIsNone(robot.simulation_dds_interface)
         self.assertEqual(robot.capabilities, frozenset({Capability.OBSERVE, Capability.STAND}))
 
-    def test_default_positions_must_match_29_dof_contract(self) -> None:
+    def test_default_positions_and_dds_interface_validation(self) -> None:
         with self.assertRaisesRegex(ValueError, "exactly 29"):
             UnitreeG1LeRobot(default_positions=[0.0] * 28)
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            UnitreeG1LeRobot(simulation_dds_interface="   ")
 
 
 if __name__ == "__main__":
