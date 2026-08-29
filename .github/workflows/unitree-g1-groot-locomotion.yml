@@ -116,3 +116,8 @@ jobs:
         env:
           UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
         run: python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_preprocessing.py" -v
+      - name: Run GR00T knee-gain A/B characterization
+        timeout-minutes: 3
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+        run: python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_gains.py" -v
