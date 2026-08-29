@@ -164,3 +164,53 @@ jobs:
           path: ${{ runner.temp }}/groot_gain_ab_result.json
           if-no-files-found: error
           retention-days: 7
+      - name: Run GR00T physics-timestep A/B characterization
+        id: timestep_ab
+        timeout-minutes: 4
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+          GROOT_TIMESTEP_RESULT: ${{ runner.temp }}/groot_timestep_ab_result.json
+        run: |
+          set -o pipefail
+          python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_timestep.py" -v \
+            | tee "$RUNNER_TEMP/groot_timestep_ab.log"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          log = Path(os.environ["RUNNER_TEMP"]) / "groot_timestep_ab.log"
+          prefix = "GROOT_TIMESTEP_AB "
+          matches = [line[len(prefix):] for line in log.read_text().splitlines() if line.startswith(prefix)]
+          if len(matches) != 1:
+              raise SystemExit(f"expected exactly one {prefix.strip()} record, found {len(matches)}")
+          payload = json.loads(matches[0])
+          Path(os.environ["GROOT_TIMESTEP_RESULT"]).write_text(
+              json.dumps(payload, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          aggregates = payload["aggregates"]
+          pinned = aggregates["pinned_envhub_250hz"]
+          reference = aggregates["nvidia_reference_200hz"]
+          outputs = {
+              "pinned_fwd": pinned["mean_forward_displacement_m"],
+              "ref_fwd": reference["mean_forward_displacement_m"],
+              "pinned_drift": pinned["mean_pre_drift_m"],
+              "ref_drift": reference["mean_pre_drift_m"],
+              "pinned_ratio": pinned["mean_motion_to_pre_drift_ratio"],
+              "ref_ratio": reference["mean_motion_to_pre_drift_ratio"],
+              "pinned_sim_time": pinned["mean_moving_sim_time_s"],
+              "ref_sim_time": reference["mean_moving_sim_time_s"],
+          }
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              for key, value in outputs.items():
+                  handle.write(f"{key}={float(value):.6f}\n")
+          PY
+      - name: Upload GR00T physics-timestep evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: >-
+            groot-timestep-ab_pinned-fwd-${{ steps.timestep_ab.outputs.pinned_fwd }}_ref-fwd-${{ steps.timestep_ab.outputs.ref_fwd }}_pinned-drift-${{ steps.timestep_ab.outputs.pinned_drift }}_ref-drift-${{ steps.timestep_ab.outputs.ref_drift }}_pinned-ratio-${{ steps.timestep_ab.outputs.pinned_ratio }}_ref-ratio-${{ steps.timestep_ab.outputs.ref_ratio }}
+          path: ${{ runner.temp }}/groot_timestep_ab_result.json
+          if-no-files-found: error
+          retention-days: 7
