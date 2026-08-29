@@ -21,6 +21,8 @@
 - [x] Smoke-test Microduck against pinned native runtime + official Space policies
 - [x] Add native LeRobot Unitree G1 simulation-capable semantic adapter
 - [x] Smoke-test the official Hub-hosted Unitree G1 MuJoCo environment in pinned CI
+- [x] Smoke-test the full LeRobot Unitree G1 connect/observe/reset/disconnect lifecycle against pinned EnvHub
+- [x] Characterize and regression-test the Python 3.12 Unitree/CycloneDDS explicit-loopback incompatibility
 - [ ] Track/fix upstream G1 EnvHub declared 97-D vs runtime 100-D observation-space mismatch
 - [ ] Calibrate G1 normalized locomotion axes before advertising SI-unit `WALK`
 - [ ] Normalize observations
@@ -92,6 +94,8 @@
 - [ ] Attach and evaluate a concrete SO-101 LeRobot manipulation policy/behavior executor
 - [x] Add native LeRobot Unitree G1 observation/reset/stand reference adapter
 - [x] Contract-test Unitree G1 assumptions against pinned LeRobot v0.6.1 source
+- [x] Validate native LeRobot G1 simulation lifecycle through the real default factory
+- [ ] Validate GR00T balance/standing policy through the G1 semantic `STAND` boundary
 - [ ] Add a calibrated semantic G1 locomotion executor before exposing `WALK`
 - [ ] Add XLeRobot real adapter
 - [ ] Preserve identical high-level skill API
