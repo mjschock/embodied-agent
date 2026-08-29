@@ -152,7 +152,7 @@ class SO101LeRobotTests(unittest.TestCase):
             try:
                 result = await robot.execute(
                     "manipulate",
-                    skill="pick",
+                    behavior="pick",
                     target="red_block",
                     max_duration_s=4.0,
                 )
@@ -164,7 +164,7 @@ class SO101LeRobotTests(unittest.TestCase):
                 self.assertEqual(native.send_action_calls, [])
 
                 with self.assertRaisesRegex(ValueError, "not configured"):
-                    await robot.execute("manipulate", skill="wave")
+                    await robot.execute("manipulate", behavior="wave")
                 self.assertEqual(len(executor.calls), 1)
             finally:
                 await robot.disconnect()
@@ -205,21 +205,21 @@ class SO101LeRobotTests(unittest.TestCase):
                 for tool in router.list_tools()
                 if tool["name"] == "so101.manipulate"
             )
-            self.assertEqual(manipulate_schema["required"], ["skill"])
+            self.assertEqual(manipulate_schema["required"], ["behavior"])
             self.assertFalse(manipulate_schema["additionalProperties"])
 
             await capable.connect()
             try:
                 call = await router.call(
                     "so101.manipulate",
-                    {"skill": "pick", "target": "cube", "max_duration_s": 3},
+                    {"behavior": "pick", "target": "cube", "max_duration_s": 3},
                 )
                 self.assertTrue(call.ok)
                 self.assertEqual(call.data["target"], "cube")
                 with self.assertRaises(ToolValidationError):
                     await router.call(
                         "so101.manipulate",
-                        {"skill": "pick", "joint_target": 90},
+                        {"behavior": "pick", "joint_target": 90},
                     )
             finally:
                 await capable.disconnect()
