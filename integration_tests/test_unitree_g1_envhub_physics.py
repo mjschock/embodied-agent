@@ -62,17 +62,47 @@ class UnitreeG1EnvHubPhysicsTests(unittest.TestCase):
         )
         try:
             self.assertEqual(env.action_space.shape, (29,))
+
+            # The pinned EnvHub revision declares 29 * 3 + 10 = 97 values, but its
+            # current simulator state contains 30 q/dq/tau entries and therefore
+            # reset()/step() return 100 values. Keep both sides explicit so a future
+            # upstream correction becomes a visible contract change rather than a
+            # silent tolerance in our physics gate.
             self.assertEqual(env.observation_space.shape, (97,))
 
             observation, info = env.reset(seed=123)
-            self.assertEqual(observation.shape, (97,))
+            raw = env.sim_env.prepare_obs()
+            component_lengths = {
+                name: int(np.asarray(raw[name]).size)
+                for name in (
+                    "body_q",
+                    "body_dq",
+                    "body_tau_est",
+                    "floating_base_pose",
+                    "floating_base_vel",
+                    "floating_base_acc",
+                )
+            }
+            print(f"Pinned G1 observation component lengths: {component_lengths}")
+            self.assertEqual(
+                component_lengths,
+                {
+                    "body_q": 30,
+                    "body_dq": 30,
+                    "body_tau_est": 30,
+                    "floating_base_pose": 7,
+                    "floating_base_vel": 6,
+                    "floating_base_acc": 3,
+                },
+            )
+            self.assertEqual(observation.shape, (100,))
             self.assertTrue(np.isfinite(observation).all())
             self.assertEqual(info, {})
 
             zero_action = np.zeros(29, dtype=np.float32)
             for _ in range(5):
                 observation, reward, terminated, truncated, info = env.step(zero_action)
-                self.assertEqual(observation.shape, (97,))
+                self.assertEqual(observation.shape, (100,))
                 self.assertTrue(np.isfinite(observation).all())
                 self.assertEqual(reward, 0.0)
                 self.assertFalse(terminated)
