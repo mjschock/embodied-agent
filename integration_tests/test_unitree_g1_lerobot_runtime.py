@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+from unittest import TestCase
+from unittest.mock import patch
+
+import numpy as np
+import yaml
+
+from embodied_agent.embodiments import UnitreeG1LeRobot
+
+
+class UnitreeG1LeRobotRuntimeTests(TestCase):
+    def test_default_factory_connect_observe_reset_disconnect_against_pinned_envhub(self) -> None:
+        async def scenario() -> None:
+            env_root = Path(os.environ["UNITREE_G1_ENV_ROOT"]).resolve()
+            env_file = env_root / "env.py"
+            config_path = env_root / "config.yaml"
+            self.assertTrue(env_file.exists(), env_file)
+            self.assertTrue(config_path.exists(), config_path)
+
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            config.update(
+                {
+                    "ENABLE_ONSCREEN": False,
+                    "ENABLE_OFFSCREEN": False,
+                    "USE_JOYSTICK": 0,
+                    "PRINT_SCENE_INFORMATION": False,
+                }
+            )
+            config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+            # Keep both LeRobot's Hub env loader and the EnvHub module's own asset
+            # lookup on the exact local checkout prepared by CI. UnitreeG1.connect()
+            # still exercises LeRobot's native make_env/import/normalize path; only
+            # network resolution is replaced with the pinned files.
+            import huggingface_hub
+            import lerobot.envs.utils as env_utils
+
+            robot = UnitreeG1LeRobot(
+                name="g1",
+                is_simulation=True,
+                controller=None,
+                gravity_compensation=False,
+            )
+
+            with (
+                patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
+                patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
+                patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
+            ):
+                await robot.connect()
+                try:
+                    observation = await robot.observe()
+                    self.assertEqual(observation.state["backend"], "lerobot-unitree-g1")
+                    self.assertTrue(observation.state["is_simulation"])
+                    self.assertIsNone(observation.state["controller"])
+                    self.assertEqual(len(observation.state["joint_position_rad"]), 29)
+                    self.assertEqual(len(observation.state["joint_velocity_rad_s"]), 29)
+                    self.assertEqual(len(observation.state["joint_torque_est_nm"]), 29)
+                    self.assertTrue(
+                        all(
+                            np.isfinite(value)
+                            for values in (
+                                observation.state["joint_position_rad"],
+                                observation.state["joint_velocity_rad_s"],
+                                observation.state["joint_torque_est_nm"],
+                            )
+                            for value in values.values()
+                        )
+                    )
+                    self.assertTrue(observation.state["imu"])
+                    self.assertTrue(all(np.isfinite(v) for v in observation.state["imu"].values()))
+
+                    result = await robot.execute("reset")
+                    self.assertTrue(result.ok)
+                    self.assertTrue(result.data["is_simulation"])
+                    self.assertIsNone(result.data["controller"])
+
+                    after_reset = await robot.observe()
+                    self.assertEqual(len(after_reset.state["joint_position_rad"]), 29)
+                    self.assertTrue(
+                        all(np.isfinite(v) for v in after_reset.state["joint_position_rad"].values())
+                    )
+                finally:
+                    await robot.disconnect()
+
+        asyncio.run(scenario())
