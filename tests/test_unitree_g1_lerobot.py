@@ -10,6 +10,14 @@ from embodied_agent.core import Capability, RobotRegistry
 from embodied_agent.embodiments import UnitreeG1LeRobot
 
 
+class FakeEndpoint:
+    def __init__(self) -> None:
+        self.close_count = 0
+
+    def Close(self) -> None:
+        self.close_count += 1
+
+
 class FakeNativeG1:
     def __init__(self) -> None:
         self.connect_count = 0
@@ -17,6 +25,8 @@ class FakeNativeG1:
         self.reset_count = 0
         self.actions: list[dict[str, Any]] = []
         self.camera_frame = [["pixel"]]
+        self.lowstate_subscriber = FakeEndpoint()
+        self.lowcmd_publisher = FakeEndpoint()
 
     def connect(self) -> None:
         self.connect_count += 1
@@ -145,6 +155,29 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
                 self.assertTrue(all(not key.endswith(".q") for key in native.actions[0]))
             finally:
                 await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_simulation_disconnect_closes_sdk_endpoints_without_touching_physical(self) -> None:
+        async def scenario() -> None:
+            simulated_native = FakeNativeG1()
+            simulated = UnitreeG1LeRobot(robot_factory=self._factory(simulated_native))
+            await simulated.connect()
+            await simulated.disconnect()
+            self.assertEqual(simulated_native.disconnect_count, 1)
+            self.assertEqual(simulated_native.lowstate_subscriber.close_count, 1)
+            self.assertEqual(simulated_native.lowcmd_publisher.close_count, 1)
+
+            physical_native = FakeNativeG1()
+            physical = UnitreeG1LeRobot(
+                is_simulation=False,
+                robot_factory=self._factory(physical_native),
+            )
+            await physical.connect()
+            await physical.disconnect()
+            self.assertEqual(physical_native.disconnect_count, 1)
+            self.assertEqual(physical_native.lowstate_subscriber.close_count, 0)
+            self.assertEqual(physical_native.lowcmd_publisher.close_count, 0)
 
         asyncio.run(scenario())
 

@@ -114,7 +114,7 @@ The environment concatenates 29 position + 29 velocity + 29 torque values, the f
 
 ## Full LeRobot lifecycle evidence
 
-The separate `unitree-g1-lerobot-runtime` workflow exercises the adapter's **real default LeRobot factory**, rather than constructing the EnvHub environment directly. Its executable evidence head is `d34eefcb3698535a3a6a04770da76e6d8ec7f014`.
+The separate `unitree-g1-lerobot-runtime` workflow exercises the adapter's **real default LeRobot factory**, rather than constructing the EnvHub environment directly. Its original executable evidence head is `d34eefcb3698535a3a6a04770da76e6d8ec7f014`.
 
 The workflow pins:
 
@@ -140,6 +140,23 @@ Unitree auto-interface DDS domain
 ```
 
 This establishes the full LeRobot/DDS/EnvHub lifecycle independently from GR00T policy loading.
+
+### Same-process simulation reconnect lifecycle
+
+Executable evidence head `a6fd7a7643d587834da3e7366051da424d56b6af` strengthens the full-runtime gate to execute **two consecutive complete native lifecycles in one Python process** on the same adapter instance:
+
+```text
+connect -> observe -> reset -> observe -> disconnect
+connect -> observe -> reset -> observe -> disconnect
+```
+
+All 12 required project workflows passed on that exact code-bearing head.
+
+The earlier strict GR00T diagnostic had exposed a simulator-thread/quaternion exception after disconnecting and recreating the full simulated G1 stack. Inspection of pinned LeRobot v0.6.1 showed that `UnitreeG1.disconnect()` stops its own subscriber/controller threads and closes EnvHub but does not close the Unitree SDK2 low-state subscriber or low-command publisher. The pinned SDK2 objects expose explicit `Close()` methods.
+
+`UnitreeG1LeRobot.disconnect()` now lets native LeRobot perform its teardown first, then explicitly closes those two SDK2 endpoints **for simulation only** before releasing the native robot reference. The strengthened runtime gate proves that an immediate fresh default-factory G1 can then reconnect, observe all 29 finite q/dq/tau joint fields plus finite IMU state, execute native reset, observe again, and disconnect successfully.
+
+Physical G1 teardown is intentionally unchanged because it has not been validated on hardware. This lifecycle compatibility fix also changes no semantic capability or MCP schema; `WALK` remains unadvertised.
 
 ## Pinned GR00T semantic stand evidence
 
@@ -191,7 +208,7 @@ The result was `reproducibility_rate = 1.0`, `max_abs_error = 0.0`, with no mism
 
 A deliberately stricter diagnostic first compared the instantaneous values of all 29 joint positions/velocities and the 15 controller outputs across reset episodes. That hypothesis was falsified: wall-clock snapshots diverged by as much as about `9.65`, despite exact zero command and `0.0 rad` tilt in every episode. LeRobot controller inference and EnvHub physics advance on asynchronous background threads, so those instantaneous state values are phase-sensitive. The project did **not** relax the numerical tolerance to make that probe pass; instead, those fields remain checked for shape and finiteness while reproducibility is claimed only for the semantic/behavioral boundary that the simulator demonstrates.
 
-The strict diagnostic also exposed a native EnvHub simulator-thread/quaternion exception when repeatedly disconnecting and reconnecting the full G1 stack inside one Python process. The validated metric gate therefore uses one native lifecycle with repeated `reset()` episodes, matching the intended episode model. Repeated same-process reconnect remains a separate lifecycle issue to characterize rather than being hidden inside the reproducibility metric.
+That strict diagnostic also exposed the same-process reconnect teardown defect described above. It is now covered separately by the two-lifecycle native runtime gate rather than being hidden inside the reproducibility metric.
 
 This evidence is simulation-only. It proves GR00T balance/standing through the semantic G1 boundary, not physical G1 execution and not calibrated locomotion.
 
@@ -224,7 +241,7 @@ The `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobo
 - controller reset on robot reset;
 - GR00T balance-policy selection for near-zero commands.
 
-Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter. The GR00T stand workflow then proves that the agent-facing semantic `stand` call reaches the pinned balance policy, remains upright within the bounded roll/pitch envelope, and meets the recorded reliability/reproducibility contract.
+Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter, including immediate same-process reconnect after simulated SDK2 endpoint cleanup. The GR00T stand workflow then proves that the agent-facing semantic `stand` call reaches the pinned balance policy, remains upright within the bounded roll/pitch envelope, and meets the recorded reliability/reproducibility contract.
 
 ## Not yet proven
 

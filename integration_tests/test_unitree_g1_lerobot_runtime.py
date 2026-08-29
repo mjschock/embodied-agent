@@ -13,7 +13,7 @@ from embodied_agent.embodiments import UnitreeG1LeRobot
 
 
 class UnitreeG1LeRobotRuntimeTests(TestCase):
-    def test_default_factory_connect_observe_reset_disconnect_against_pinned_envhub(self) -> None:
+    def test_default_factory_reconnects_cleanly_against_pinned_envhub(self) -> None:
         async def scenario() -> None:
             env_root = Path(os.environ["UNITREE_G1_ENV_ROOT"]).resolve()
             env_file = env_root / "env.py"
@@ -57,42 +57,48 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                 patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
                 patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
             ):
-                await robot.connect()
-                try:
-                    observation = await robot.observe()
-                    self.assertEqual(observation.state["backend"], "lerobot-unitree-g1")
-                    self.assertTrue(observation.state["is_simulation"])
-                    self.assertIsNone(observation.state["controller"])
-                    self.assertEqual(observation.state["simulation_dds_interface"], "auto")
-                    self.assertEqual(len(observation.state["joint_position_rad"]), 29)
-                    self.assertEqual(len(observation.state["joint_velocity_rad_s"]), 29)
-                    self.assertEqual(len(observation.state["joint_torque_est_nm"]), 29)
-                    self.assertTrue(
-                        all(
-                            np.isfinite(value)
-                            for values in (
-                                observation.state["joint_position_rad"],
-                                observation.state["joint_velocity_rad_s"],
-                                observation.state["joint_torque_est_nm"],
+                # Run two complete default-factory lifecycles on the same adapter
+                # instance. The second connect constructs a fresh native LeRobot G1
+                # while reusing SDK2's process-global DDS factory. This specifically
+                # detects stale reader/writer resources leaking across disconnect.
+                for lifecycle in range(2):
+                    await robot.connect()
+                    try:
+                        observation = await robot.observe()
+                        self.assertEqual(observation.state["backend"], "lerobot-unitree-g1")
+                        self.assertTrue(observation.state["is_simulation"])
+                        self.assertIsNone(observation.state["controller"])
+                        self.assertEqual(observation.state["simulation_dds_interface"], "auto")
+                        self.assertEqual(len(observation.state["joint_position_rad"]), 29)
+                        self.assertEqual(len(observation.state["joint_velocity_rad_s"]), 29)
+                        self.assertEqual(len(observation.state["joint_torque_est_nm"]), 29)
+                        self.assertTrue(
+                            all(
+                                np.isfinite(value)
+                                for values in (
+                                    observation.state["joint_position_rad"],
+                                    observation.state["joint_velocity_rad_s"],
+                                    observation.state["joint_torque_est_nm"],
+                                )
+                                for value in values.values()
                             )
-                            for value in values.values()
                         )
-                    )
-                    self.assertTrue(observation.state["imu"])
-                    self.assertTrue(all(np.isfinite(v) for v in observation.state["imu"].values()))
+                        self.assertTrue(observation.state["imu"])
+                        self.assertTrue(all(np.isfinite(v) for v in observation.state["imu"].values()))
 
-                    result = await robot.execute("reset")
-                    self.assertTrue(result.ok)
-                    self.assertTrue(result.data["is_simulation"])
-                    self.assertIsNone(result.data["controller"])
-                    self.assertEqual(result.data["simulation_dds_interface"], "auto")
+                        result = await robot.execute("reset")
+                        self.assertTrue(result.ok)
+                        self.assertTrue(result.data["is_simulation"])
+                        self.assertIsNone(result.data["controller"])
+                        self.assertEqual(result.data["simulation_dds_interface"], "auto")
 
-                    after_reset = await robot.observe()
-                    self.assertEqual(len(after_reset.state["joint_position_rad"]), 29)
-                    self.assertTrue(
-                        all(np.isfinite(v) for v in after_reset.state["joint_position_rad"].values())
-                    )
-                finally:
-                    await robot.disconnect()
+                        after_reset = await robot.observe()
+                        self.assertEqual(len(after_reset.state["joint_position_rad"]), 29)
+                        self.assertTrue(
+                            all(np.isfinite(v) for v in after_reset.state["joint_position_rad"].values())
+                        )
+                        print(f"G1_LIFECYCLE_OK {lifecycle + 1}", flush=True)
+                    finally:
+                        await robot.disconnect()
 
         asyncio.run(scenario())
