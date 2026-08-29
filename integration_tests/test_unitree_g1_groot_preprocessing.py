@@ -221,24 +221,24 @@ class UnitreeG1GrootPreprocessingCharacterizationTests(TestCase):
                             ),
                         }
 
-                    results: list[dict[str, Any]] = []
-                    for remote_ly in (0.0, 0.50):
-                        results.append(
-                            await episode(
-                                preprocessing="lerobot_v0.6.1",
-                                ang_vel_scale=0.25,
-                                yaw_cmd_scale=0.25,
-                                remote_ly=remote_ly,
-                            )
-                        )
-                        results.append(
-                            await episode(
-                                preprocessing="groot_reference",
-                                ang_vel_scale=0.50,
-                                yaw_cmd_scale=0.50,
-                                remote_ly=remote_ly,
-                            )
-                        )
+                    # The zero-command baseline is already measured by the main
+                    # locomotion characterization. This A/B isolates only the motion
+                    # command where the preprocessing discrepancy could matter.
+                    remote_ly = 0.50
+                    results = [
+                        await episode(
+                            preprocessing="lerobot_v0.6.1",
+                            ang_vel_scale=0.25,
+                            yaw_cmd_scale=0.25,
+                            remote_ly=remote_ly,
+                        ),
+                        await episode(
+                            preprocessing="groot_reference",
+                            ang_vel_scale=0.50,
+                            yaw_cmd_scale=0.50,
+                            remote_ly=remote_ly,
+                        ),
+                    ]
 
                     print(
                         "GROOT_PREPROCESSING_AB " + json.dumps(results, sort_keys=True),
