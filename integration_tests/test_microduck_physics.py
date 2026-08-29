@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import unittest
 from pathlib import Path
 
 from embodied_agent.core import Capability
 from embodied_agent.embodiments import MicroduckMuJoCo
+from embodied_agent.evals.reproducibility import benchmark_reproducibility
 
 
 class MicroduckPhysicsIntegrationTests(unittest.TestCase):
-    def test_policy_backed_semantic_skills_in_real_mujoco(self) -> None:
+    def _robot(self) -> MicroduckMuJoCo:
         runtime_root = Path(os.environ["MICRODUCK_RL_ROOT"])
         policy_dir = Path(os.environ["MICRODUCK_POLICY_DIR"])
-        robot = MicroduckMuJoCo(
+        return MicroduckMuJoCo(
             runtime_root=runtime_root,
             walking_policy_path=policy_dir / "BEST_alpha_walking.onnx",
             standing_policy_path=policy_dir / "BEST_alpha_stand.onnx",
@@ -21,6 +23,9 @@ class MicroduckPhysicsIntegrationTests(unittest.TestCase):
             kick_right_policy_path=policy_dir / "ball_kick_right.onnx",
             roll_policy_path=policy_dir / "roulade.onnx",
         )
+
+    def test_policy_backed_semantic_skills_in_real_mujoco(self) -> None:
+        robot = self._robot()
 
         async def scenario() -> None:
             await robot.connect()
@@ -75,6 +80,55 @@ class MicroduckPhysicsIntegrationTests(unittest.TestCase):
                 self.assertTrue(reset.ok, reset.data)
             finally:
                 await robot.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_reset_stand_and_left_kick_are_reproducible(self) -> None:
+        robot = self._robot()
+
+        async def scenario() -> None:
+            await robot.connect()
+            try:
+                async def run_episode(_: int):
+                    reset = await robot.execute("reset")
+                    self.assertTrue(reset.ok, reset.data)
+                    stand = await robot.execute("stand")
+                    self.assertTrue(stand.ok, stand.data)
+                    kick = await robot.execute("kick", foot="left")
+                    self.assertTrue(kick.ok, kick.data)
+                    return {
+                        "stand": {
+                            "upright": bool(stand.data["upright"]),
+                            "position_m": stand.data["position_m"],
+                            "projected_gravity": stand.data["projected_gravity"],
+                            "joint_position_rad": stand.data["joint_position_rad"],
+                            "joint_velocity_rps": stand.data["joint_velocity_rps"],
+                        },
+                        "kick": {
+                            "ok": bool(kick.ok),
+                            "foot": kick.data["foot"],
+                            "position_m": kick.data["position_m"],
+                            "orientation_wxyz": kick.data["orientation_wxyz"],
+                            "projected_gravity": kick.data["projected_gravity"],
+                            "joint_position_rad": kick.data["joint_position_rad"],
+                            "joint_velocity_rps": kick.data["joint_velocity_rps"],
+                            "policy": kick.data["policy"],
+                            "behavior": kick.data["behavior"],
+                        },
+                    }
+
+                result = await benchmark_reproducibility(
+                    run_episode,
+                    attempts=3,
+                    atol=1e-9,
+                    label="microduck-reset-stand-left-kick",
+                )
+            finally:
+                await robot.disconnect()
+
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+            self.assertEqual(result.reproducibility_rate, 1.0, result.to_dict())
+            self.assertTrue(all(sample.matches_baseline for sample in result.samples))
 
         asyncio.run(scenario())
 

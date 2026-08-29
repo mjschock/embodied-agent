@@ -44,6 +44,37 @@ Investigation of the pinned upstream runtime showed that `VelocityAviary` owns p
 
 This is why reproducibility is evaluated separately from reliability: the original Crazyflie reliability suite was 9/9 successful even while hidden controller state was leaking across resets.
 
+## Microduck pinned result
+
+The pinned Microduck native MuJoCo/ONNX probe repeats:
+
+```text
+reset
+stand
+kick(foot="left")
+```
+
+The stable payload includes stand position/projected gravity/joint position/joint velocity plus the completed kick's position, orientation, projected gravity, joint state, selected foot, policy, and behavior state. At `atol=1e-9`, both comparisons matched with **max absolute error 0.0**. The learned-policy episode was bit-for-bit identical across all three resets, so the current reset of MuJoCo state plus policy history is sufficient for this probe.
+
+## LeRobot Humanoid pinned result
+
+The pinned fixed-base official Humanoid MuJoCo controller probe repeats:
+
+```text
+reset
+stand
+observe
+```
+
+The payload intentionally excludes asynchronous `sim_step_count` and `sim_reset_count`; those reflect thread scheduling rather than simulation state. It compares reset/stand/observed 12-joint positions plus fixed-base and policy-active flags. At `atol=1e-8`, all selected fields were **bit-for-bit identical** with **max absolute error 0.0** across the three episodes.
+
 ## Current scope
 
-Pinned reproducibility probes currently cover XLeRobot and Crazyflie. Microduck and LeRobot Humanoid are tracked as the next extension; their stable payloads need to exclude scheduler-dependent fields such as asynchronous simulation step counters while still detecting meaningful policy/controller state leakage.
+All four current physics-backed simulator embodiments now have pinned reset-conditioned reproducibility probes:
+
+- Crazyflie / PyBullet
+- XLeRobot / MuJoCo
+- Microduck / MuJoCo + ONNX policies
+- LeRobot Humanoid / official fixed-base MuJoCo controller
+
+These probes establish deterministic baselines for the selected semantic episodes. They do not imply that wall-clock execution time is deterministic or that untested policy/behavior paths are automatically reproducible.
