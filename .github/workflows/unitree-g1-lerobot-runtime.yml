@@ -92,13 +92,13 @@ jobs:
           git -C .vendor/unitree-g1-mujoco checkout a38dc8617f0fca51b38e9354dc58ee35ad850fb5
           git -C .vendor/unitree-g1-mujoco lfs pull
           git -C .vendor/unitree-g1-mujoco rev-parse HEAD
-      - name: Probe CycloneDDS loopback domain
+      - name: Probe supported Unitree auto-interface DDS domain
         run: |
           python - <<'PY'
           from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-          print("before ChannelFactoryInitialize", flush=True)
-          ChannelFactoryInitialize(0, "lo")
-          print("after ChannelFactoryInitialize", flush=True)
+          print("before ChannelFactoryInitialize(0)", flush=True)
+          ChannelFactoryInitialize(0)
+          print("after ChannelFactoryInitialize(0)", flush=True)
           PY
       - name: Probe Unitree G1 DDS topic construction
         run: |
@@ -107,7 +107,7 @@ jobs:
           from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_, LowState_
 
           print("before DDS init", flush=True)
-          ChannelFactoryInitialize(0, "lo")
+          ChannelFactoryInitialize(0)
           print("before lowcmd publisher", flush=True)
           publisher = ChannelPublisher("rt/lowcmd", LowCmd_)
           publisher.Init()
@@ -127,7 +127,7 @@ jobs:
           native = UnitreeG1(UnitreeG1Config(is_simulation=True, controller=None))
           print("after UnitreeG1 construction", native, flush=True)
           PY
-      - name: Probe LeRobot EnvHub loader
+      - name: Probe LeRobot EnvHub loader on auto-interface DDS
         env:
           UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
         run: |
@@ -150,6 +150,7 @@ jobs:
               "ENABLE_OFFSCREEN": False,
               "USE_JOYSTICK": 0,
               "PRINT_SCENE_INFORMATION": False,
+              "INTERFACE": None,
           })
           config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
