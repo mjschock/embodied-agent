@@ -11,7 +11,7 @@ from embodied_agent.core import Capability, Embodiment, Observation, SkillReques
 class SO101ManipulationExecutor(Protocol):
     """Semantic policy/skill boundary for SO-101 manipulation.
 
-    Implementations own all conversion from a named high-level skill to native
+    Implementations own all conversion from a named high-level behavior to native
     LeRobot actions/policies. The SO101LeRobot adapter itself never forwards raw
     joint targets from an agent to ``Robot.send_action()``.
     """
@@ -155,13 +155,13 @@ class SO101LeRobot(Embodiment):
                 "SO-101 manipulation is disabled until a semantic policy/skill executor is configured"
             )
 
-        skill = request.params.get("skill")
-        if not isinstance(skill, str) or not skill.strip():
-            raise ValueError("manipulate.skill must be a non-empty string")
-        skill = skill.strip()
-        if skill not in self._manipulation_skills:
+        behavior = request.params.get("behavior")
+        if not isinstance(behavior, str) or not behavior.strip():
+            raise ValueError("manipulate.behavior must be a non-empty string")
+        behavior = behavior.strip()
+        if behavior not in self._manipulation_skills:
             raise ValueError(
-                f"SO-101 manipulation skill is not configured: {skill}. "
+                f"SO-101 manipulation behavior is not configured: {behavior}. "
                 f"Allowed: {', '.join(sorted(self._manipulation_skills))}"
             )
 
@@ -179,7 +179,7 @@ class SO101LeRobot(Embodiment):
 
         outcome = self._manipulation_executor.execute(
             robot=self._require_robot(),
-            skill=skill,
+            skill=behavior,
             target=target,
             max_duration_s=max_duration,
         )
