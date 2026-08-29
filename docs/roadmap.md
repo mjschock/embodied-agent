@@ -95,7 +95,7 @@
 - [x] Add native LeRobot Unitree G1 observation/reset/stand reference adapter
 - [x] Contract-test Unitree G1 assumptions against pinned LeRobot v0.6.1 source
 - [x] Validate native LeRobot G1 simulation lifecycle through the real default factory
-- [ ] Validate GR00T balance/standing policy through the G1 semantic `STAND` boundary
+- [x] Validate GR00T balance/standing policy through the G1 semantic `STAND` boundary
 - [ ] Add a calibrated semantic G1 locomotion executor before exposing `WALK`
 - [ ] Add XLeRobot real adapter
 - [ ] Preserve identical high-level skill API

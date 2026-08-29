@@ -141,6 +141,30 @@ Unitree auto-interface DDS domain
 
 This establishes the full LeRobot/DDS/EnvHub lifecycle independently from GR00T policy loading.
 
+## Pinned GR00T semantic stand evidence
+
+The dedicated `unitree-g1-groot-stand` workflow proves the controller-backed semantic `STAND` path through the real LeRobot/Unitree/DDS/EnvHub stack. Its validated executable head is `610e6c1101148b6b066e10a6b9fcc25b29a02ab5`.
+
+In addition to the runtime pins above, it pins `nepyope/GR00T-WholeBodyControl_g1` at `921bc56492959fa3ed0fb03cecdee14ab768eefc` and verifies SHA-256 for both the balance and walk ONNX assets before LeRobot loads them. The test invokes `UnitreeG1LeRobot.execute("stand")`, confirms all four normalized remote axes remain exactly zero, and samples 100 simulator observations over two seconds.
+
+The validated run measured:
+
+```text
+samples                    100
+max_abs_roll_rad           0.0
+max_abs_pitch_rad          0.0
+max_tilt_rad               0.0
+mean_tilt_rad              0.0
+final_roll_rad             0.0
+final_pitch_rad            0.0
+final_tilt_rad             0.0
+controller_output_joints   15
+```
+
+All sampled joint states and controller outputs were finite. CI deliberately does **not** require bit-for-bit zero tilt: the behavioral gate allows `< 0.05 rad` (about 2.9 degrees) for both maximum and final roll/pitch tilt. This leaves a small physical tolerance while still failing a materially unstable standing episode.
+
+This evidence is simulation-only. It proves GR00T balance/standing through the semantic G1 boundary, not physical G1 execution and not calibrated locomotion.
+
 ### DDS compatibility defect and simulation-only workaround
 
 The first full-runtime attempt exposed a native `*** buffer overflow detected ***` abort inside `dds_create_domain` when pinned LeRobot v0.6.1 called Unitree SDK2 as:
@@ -170,11 +194,10 @@ The `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobo
 - controller reset on robot reset;
 - GR00T balance-policy selection for near-zero commands.
 
-Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter with controller loading disabled.
+Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter. The GR00T stand workflow then proves that the agent-facing semantic `stand` call reaches the pinned balance policy and remains upright within the bounded roll/pitch envelope.
 
 ## Not yet proven
 
-- GR00T balance/standing policy execution through `UnitreeG1LeRobot`;
 - locomotion-axis calibration to physical m/s and rad/s;
 - G1 `WALK` capability through the common semantic API;
 - physical G1 execution;
