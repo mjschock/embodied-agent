@@ -156,7 +156,7 @@ SAFE_SKILL_SPECS: dict[str, SkillToolSpec] = {
         "manipulate",
         Capability.MANIPULATE,
         {
-            "skill": ParamRule(kind="string"),
+            "behavior": ParamRule(kind="string"),
             "target": ParamRule(kind="string", required=False, default=None),
             "max_duration_s": _NUMBER(required=False, default=None, minimum=0.1, maximum=30.0),
         },
