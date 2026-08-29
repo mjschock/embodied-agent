@@ -23,6 +23,21 @@ REMOTE_ZERO = {
 }
 
 
+class _PolicyProbe:
+    """Transparent ONNX session wrapper that counts real policy inference calls."""
+
+    def __init__(self, session: Any):
+        self._session = session
+        self.run_calls = 0
+
+    def get_inputs(self) -> Any:
+        return self._session.get_inputs()
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        self.run_calls += 1
+        return self._session.run(*args, **kwargs)
+
+
 def _quaternion_to_rpy(quaternion_wxyz: np.ndarray) -> tuple[float, float, float]:
     w, x, y, z = (float(value) for value in quaternion_wxyz)
     sinr_cosp = 2.0 * (w * x + y * z)
@@ -65,6 +80,8 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                     # The pinned EnvHub normally applies a very stiff world-frame
                     # elastic tether to the torso. Translation measured with that
                     # tether enabled would not be a truthful locomotion calibration.
+                    # This is the non-interactive equivalent of the simulator's
+                    # documented "press 9 to release the strap" operation.
                     "ENABLE_ELASTIC_BAND": False,
                 }
             )
@@ -103,8 +120,21 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                     inner_env = native.sim_env.sim_env
                     self.assertFalse(inner_env.config["ENABLE_ELASTIC_BAND"])
 
-                    async def sample_pose(duration_s: float, interval_s: float = 0.02) -> list[dict[str, float]]:
-                        samples: list[dict[str, float]] = []
+                    # Count calls while delegating to the actual pinned ONNX sessions.
+                    # This lets the integration gate distinguish "axis never reached
+                    # GR00T" from "walk policy ran but world motion was negligible".
+                    balance_probe = _PolicyProbe(native.controller.policy_balance)
+                    walk_probe = _PolicyProbe(native.controller.policy_walk)
+                    native.controller.policy_balance = balance_probe
+                    native.controller.policy_walk = walk_probe
+
+                    async def sample_pose(
+                        duration_s: float,
+                        interval_s: float = 0.02,
+                        *,
+                        capture_controller: bool = False,
+                    ) -> list[dict[str, Any]]:
+                        samples: list[dict[str, Any]] = []
                         count = max(1, int(round(duration_s / interval_s)))
                         for _ in range(count):
                             raw = inner_env.prepare_obs()
@@ -112,17 +142,49 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                             self.assertEqual(pose.shape, (7,))
                             self.assertTrue(np.isfinite(pose).all())
                             roll, pitch, yaw = _quaternion_to_rpy(pose[3:7])
-                            samples.append(
-                                {
-                                    "x_m": float(pose[0]),
-                                    "y_m": float(pose[1]),
-                                    "z_m": float(pose[2]),
-                                    "roll_rad": roll,
-                                    "pitch_rad": pitch,
-                                    "yaw_rad": yaw,
-                                    "tilt_rad": math.hypot(roll, pitch),
-                                }
-                            )
+                            sample: dict[str, Any] = {
+                                "x_m": float(pose[0]),
+                                "y_m": float(pose[1]),
+                                "z_m": float(pose[2]),
+                                "roll_rad": roll,
+                                "pitch_rad": pitch,
+                                "yaw_rad": yaw,
+                                "tilt_rad": math.hypot(roll, pitch),
+                            }
+                            if capture_controller:
+                                with native._controller_action_lock:
+                                    controller_input = dict(native.controller_input)
+                                    controller_output = dict(native.controller_output)
+                                cmd = np.asarray(native.controller.cmd, dtype=np.float64).copy()
+                                groot_action = np.asarray(
+                                    native.controller.groot_action,
+                                    dtype=np.float64,
+                                ).copy()
+                                output_values = np.asarray(
+                                    list(controller_output.values()),
+                                    dtype=np.float64,
+                                )
+                                self.assertEqual(cmd.shape, (3,))
+                                self.assertEqual(groot_action.shape, (15,))
+                                self.assertTrue(np.isfinite(cmd).all())
+                                self.assertTrue(np.isfinite(groot_action).all())
+                                self.assertTrue(np.isfinite(output_values).all())
+                                sample.update(
+                                    {
+                                        "controller_input_remote_ly": float(
+                                            controller_input["remote.ly"]
+                                        ),
+                                        "controller_cmd_forward": float(cmd[0]),
+                                        "controller_cmd_lateral": float(cmd[1]),
+                                        "controller_cmd_yaw": float(cmd[2]),
+                                        "groot_action_l2": float(np.linalg.norm(groot_action)),
+                                        "controller_output_l2": float(
+                                            np.linalg.norm(output_values)
+                                        ),
+                                        "controller_output_count": int(output_values.size),
+                                    }
+                                )
+                            samples.append(sample)
                             await asyncio.sleep(interval_s)
                         return samples
 
@@ -139,10 +201,52 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
 
                         command = dict(REMOTE_ZERO)
                         command["remote.ly"] = remote_ly
+                        balance_calls_before = balance_probe.run_calls
+                        walk_calls_before = walk_probe.run_calls
                         native.send_action(command)
                         command_duration_s = 2.0
-                        moving_samples = await sample_pose(command_duration_s)
+                        moving_samples = await sample_pose(
+                            command_duration_s,
+                            capture_controller=True,
+                        )
                         end = moving_samples[-1]
+                        balance_policy_calls = balance_probe.run_calls - balance_calls_before
+                        walk_policy_calls = walk_probe.run_calls - walk_calls_before
+
+                        # Ignore only the first 200 ms when checking persisted command
+                        # delivery so the asynchronous 50 Hz controller gets several
+                        # cycles to consume the newly written controller_input.
+                        steady_controller_samples = moving_samples[10:]
+                        self.assertTrue(steady_controller_samples)
+                        input_errors = [
+                            abs(sample["controller_input_remote_ly"] - remote_ly)
+                            for sample in steady_controller_samples
+                        ]
+                        cmd_forward_errors = [
+                            abs(sample["controller_cmd_forward"] - remote_ly)
+                            for sample in steady_controller_samples
+                        ]
+                        cmd_cross_axis = [
+                            max(
+                                abs(sample["controller_cmd_lateral"]),
+                                abs(sample["controller_cmd_yaw"]),
+                            )
+                            for sample in steady_controller_samples
+                        ]
+                        self.assertLessEqual(max(input_errors), 1e-12)
+                        self.assertLessEqual(max(cmd_forward_errors), 1e-6)
+                        self.assertLessEqual(max(cmd_cross_axis), 1e-9)
+                        self.assertTrue(
+                            all(
+                                sample["controller_output_count"] == 15
+                                for sample in steady_controller_samples
+                            )
+                        )
+                        if abs(remote_ly) < 0.05:
+                            self.assertGreater(balance_policy_calls, 0)
+                            self.assertEqual(walk_policy_calls, 0)
+                        else:
+                            self.assertGreater(walk_policy_calls, 0)
 
                         # Return to the public semantic standing boundary after
                         # every internal calibration command.
@@ -187,6 +291,31 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                                 post_samples[-1]["x_m"] - post_samples[0]["x_m"],
                                 post_samples[-1]["y_m"] - post_samples[0]["y_m"],
                             ),
+                            "balance_policy_calls": balance_policy_calls,
+                            "walk_policy_calls": walk_policy_calls,
+                            "max_controller_input_error": max(input_errors),
+                            "max_controller_cmd_forward_error": max(cmd_forward_errors),
+                            "max_controller_cmd_cross_axis": max(cmd_cross_axis),
+                            "mean_groot_action_l2": float(
+                                np.mean(
+                                    [
+                                        sample["groot_action_l2"]
+                                        for sample in steady_controller_samples
+                                    ]
+                                )
+                            ),
+                            "max_groot_action_l2": max(
+                                sample["groot_action_l2"]
+                                for sample in steady_controller_samples
+                            ),
+                            "mean_controller_output_l2": float(
+                                np.mean(
+                                    [
+                                        sample["controller_output_l2"]
+                                        for sample in steady_controller_samples
+                                    ]
+                                )
+                            ),
                         }
 
                     results = [
@@ -199,10 +328,10 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                         flush=True,
                     )
 
-                    # This first pass is an evidence-gathering probe, not an SI
-                    # calibration contract. Only require a finite, non-collapsed
-                    # untethered simulation and let CI establish the actual command
-                    # response before setting accuracy/linearity thresholds.
+                    # This remains a characterization gate, not an SI calibration.
+                    # Require the real command/policy pipeline plus a finite,
+                    # non-collapsed untethered simulation. World-pose response is
+                    # recorded so any locomotion claim must come from measured motion.
                     for result in results:
                         numeric = [
                             value
