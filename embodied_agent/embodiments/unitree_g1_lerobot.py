@@ -80,9 +80,15 @@ class UnitreeG1LeRobot(Embodiment):
         self._robot = robot
 
     async def disconnect(self) -> None:
-        if self._robot is not None:
-            self._robot.disconnect()
-        self._robot = None
+        robot = self._robot
+        if robot is None:
+            return
+        try:
+            robot.disconnect()
+        finally:
+            if self.is_simulation:
+                self._close_simulation_dds_endpoints(robot)
+            self._robot = None
 
     async def observe(self) -> Observation:
         native = dict(self._require_robot().get_observation())
@@ -188,6 +194,26 @@ class UnitreeG1LeRobot(Embodiment):
             return original(domain_id, interface)
 
         robot._ChannelFactoryInitialize = initialize
+
+    @staticmethod
+    def _close_simulation_dds_endpoints(robot: Any) -> None:
+        """Close SDK2 endpoints LeRobot v0.6.1 leaves open in simulation.
+
+        UnitreeG1.disconnect() stops LeRobot's subscribe/controller threads and closes
+        EnvHub, but it does not close its SDK2 low-state reader or low-command writer.
+        The pinned SDK2 objects expose ``Close()`` for those endpoints. Releasing them
+        after LeRobot has joined its own threads prevents stale DDS readers/writers
+        from leaking into a later same-process simulated G1 lifecycle.
+
+        This compatibility cleanup is simulation-only. Physical G1 teardown remains
+        exactly LeRobot-owned until it is validated on hardware.
+        """
+
+        for attribute in ("lowstate_subscriber", "lowcmd_publisher"):
+            endpoint = getattr(robot, attribute, None)
+            close = getattr(endpoint, "Close", None)
+            if callable(close):
+                close()
 
     @staticmethod
     def _load_default_robot_factory() -> NativeRobotFactory:
