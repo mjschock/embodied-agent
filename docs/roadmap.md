@@ -25,6 +25,7 @@
 - [x] Characterize and regression-test the Python 3.12 Unitree/CycloneDDS explicit-loopback incompatibility
 - [x] Characterize/fix repeated same-process G1 simulation reconnect lifecycle
 - [x] Characterize untethered G1 GR00T normalized locomotion command/actuator path and document the no-motion compatibility gap
+- [x] Characterize pinned-vs-current G1 GR00T knee-gain profile and reject unsupported production override
 - [ ] Track/fix upstream G1 EnvHub declared 97-D vs runtime 100-D observation-space mismatch
 - [ ] Calibrate G1 normalized locomotion axes before advertising SI-unit `WALK`
 - [ ] Normalize observations
