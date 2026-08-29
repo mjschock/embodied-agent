@@ -1,0 +1,24 @@
+name: so101-lerobot-contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  so101-lerobot-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: huggingface/lerobot
+          ref: 7e241bd630a3719a56157a497ce5d08f244784f1
+          path: .vendor/lerobot
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify pinned LeRobot v0.6.1 SO-101 source contract
+        env:
+          LEROBOT_SOURCE_ROOT: ${{ github.workspace }}/.vendor/lerobot
+        run: python -m unittest discover -s integration_tests -p "test_so101_lerobot_contract.py" -v
