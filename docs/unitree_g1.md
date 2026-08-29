@@ -212,6 +212,38 @@ That strict diagnostic also exposed the same-process reconnect teardown defect d
 
 This evidence is simulation-only. It proves GR00T balance/standing through the semantic G1 boundary, not physical G1 execution and not calibrated locomotion.
 
+## Untethered GR00T locomotion characterization
+
+Executable evidence head `110eab0fc33c0cef6e3f905c912b41aefb870122` adds a separate pinned locomotion characterization gate. All 13 project workflows passed on that exact code-bearing head.
+
+The official EnvHub configuration normally enables an `ElasticBand` with stiff world-frame position/orientation feedback. Because that tether would make translation measurements misleading, the characterization sets `ENABLE_ELASTIC_BAND=false` **before** constructing the environment. It then measures MuJoCo's raw `floating_base_pose` world XYZ + quaternion while applying test-internal normalized forward inputs for two seconds.
+
+The measured response was:
+
+| `remote.ly` | forward displacement (m) | mean forward (m/s) | pre-command drift (m) | walk-policy calls |
+| ---: | ---: | ---: | ---: | ---: |
+| 0.00 | -0.005682 | -0.002841 | 0.006241 | 0 |
+| 0.10 | -0.001418 | -0.000709 | 0.009980 | 100 |
+| 0.25 | +0.002886 | +0.001443 | 0.012825 | 100 |
+| 0.50 | +0.004865 | +0.002433 | 0.017704 | 101 |
+
+The command pipeline itself is working. During commanded episodes the normalized input persists in LeRobot's controller state, the GR00T walk ONNX policy is selected and invoked, all 15 controller targets remain finite and vary over time, those targets reach Unitree `lowcmd` exactly (`lowcmd_vs_controller_target_rms_rad = 0.0`), and MuJoCo lower-body joints show material position/velocity activity.
+
+However, commanded world translation remains only millimeter-scale, is not a monotonic response to command magnitude, and is smaller than the reset-conditioned pre-command drift for every tested non-zero command. This is therefore **not** evidence of usable locomotion and cannot support an SI-unit calibration.
+
+### GR00T preprocessing A/B
+
+A second reset-conditioned experiment tested a concrete compatibility hypothesis without changing production behavior. LeRobot v0.6.1 uses angular-velocity observation scale `0.25` and yaw-command scale `0.25`, while the published GR00T reference metadata/runner specifies `0.5` for those values. At the same normalized forward input (`remote.ly = 0.50`):
+
+| preprocessing | angular/yaw scale | forward displacement (m) | pre-command drift (m) |
+| --- | ---: | ---: | ---: |
+| LeRobot v0.6.1 | 0.25 | -0.001022 | 0.006491 |
+| GR00T reference | 0.50 | +0.000752 | 0.013212 |
+
+Both variants continued to produce active lower-body trajectories, but neither produced body translation above its own pre-command drift. The `0.25 -> 0.5` preprocessing mismatch is therefore a falsified locomotion-fix hypothesis for this pinned stack. Production LeRobot constants remain unchanged.
+
+This is a successful characterization of a compatibility gap, not a locomotion success. `WALK` stays unadvertised until the simulator demonstrates repeatable body motion that can support a truthful semantic SI mapping.
+
 ### DDS compatibility defect and simulation-only workaround
 
 The first full-runtime attempt exposed a native `*** buffer overflow detected ***` abort inside `dds_create_domain` when pinned LeRobot v0.6.1 called Unitree SDK2 as:
@@ -241,7 +273,7 @@ The `unitree-g1-lerobot-contract` workflow statically verifies the pinned LeRobo
 - controller reset on robot reset;
 - GR00T balance-policy selection for near-zero commands.
 
-Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter, including immediate same-process reconnect after simulated SDK2 endpoint cleanup. The GR00T stand workflow then proves that the agent-facing semantic `stand` call reaches the pinned balance policy, remains upright within the bounded roll/pitch envelope, and meets the recorded reliability/reproducibility contract.
+Normal unit tests use a fake native G1 and verify that `stand` sends only zero remote axes and never joint targets. The independent physics workflow proves the pinned official EnvHub MuJoCo runtime can initialize, reset, and advance physics headlessly. The full-runtime workflow separately proves the native LeRobot G1 lifecycle through the actual adapter, including immediate same-process reconnect after simulated SDK2 endpoint cleanup. The GR00T stand workflow then proves that the agent-facing semantic `stand` call reaches the pinned balance policy, remains upright within the bounded roll/pitch envelope, and meets the recorded reliability/reproducibility contract. The separate locomotion characterization proves the normalized command reaches GR00T, the walk policy and lower-body actuator chain execute, and—critically—that this pinned stack still does not demonstrate body translation suitable for calibration.
 
 ## Not yet proven
 
