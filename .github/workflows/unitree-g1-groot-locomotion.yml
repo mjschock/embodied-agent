@@ -108,4 +108,6 @@ jobs:
       - name: Run untethered normalized locomotion characterization
         env:
           UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
-        run: python -m unittest discover -s integration_tests -p "test_unitree_g1_groot_*.py" -v
+        run: |
+          python -m unittest discover -s integration_tests -p "test_unitree_g1_groot_locomotion.py" -v
+          python -m unittest discover -s integration_tests -p "test_unitree_g1_groot_preprocessing.py" -v
