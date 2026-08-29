@@ -13,6 +13,7 @@ from embodied_agent.embodiments import (
     HumanoidSim,
     MicroduckMuJoCo,
     SO101LeRobot,
+    UnitreeG1LeRobot,
     XLeRobotMuJoCo,
     XLeRobotSim,
 )
@@ -27,6 +28,7 @@ DEFAULT_ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
     "lerobot_humanoid_mujoco": HumanoidMuJoCo,
     "humanoid_stub": HumanoidSim,
     "lerobot_so101": SO101LeRobot,
+    "lerobot_unitree_g1": UnitreeG1LeRobot,
     "microduck_mujoco": MicroduckMuJoCo,
     "xlerobot_mujoco": XLeRobotMuJoCo,
     "xlerobot_stub": XLeRobotSim,
