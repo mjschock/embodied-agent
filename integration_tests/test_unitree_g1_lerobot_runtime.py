@@ -50,6 +50,7 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                 controller=None,
                 gravity_compensation=False,
                 simulation_dds_interface=None,
+                simulation_publish_images=False,
             )
 
             with (
@@ -58,17 +59,23 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                 patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
             ):
                 # Run two complete default-factory lifecycles on the same adapter
-                # instance. The second connect constructs a fresh native LeRobot G1
-                # while reusing SDK2's process-global DDS factory. This specifically
-                # detects stale reader/writer resources leaking across disconnect.
+                # instance. Headless image publishing makes the simulation state
+                # thread run near its intended 250 Hz cadence, so the semantic reset
+                # also exercises the adapter's step/reset serialization boundary.
                 for lifecycle in range(2):
                     await robot.connect()
                     try:
+                        native = robot._robot
+                        self.assertIsNotNone(native)
+                        self.assertIsNotNone(native.sim_env)
+                        self.assertEqual(len(native.sim_env.camera_configs), 0)
+
                         observation = await robot.observe()
                         self.assertEqual(observation.state["backend"], "lerobot-unitree-g1")
                         self.assertTrue(observation.state["is_simulation"])
                         self.assertIsNone(observation.state["controller"])
                         self.assertEqual(observation.state["simulation_dds_interface"], "auto")
+                        self.assertFalse(observation.state["simulation_publish_images"])
                         self.assertEqual(len(observation.state["joint_position_rad"]), 29)
                         self.assertEqual(len(observation.state["joint_velocity_rad_s"]), 29)
                         self.assertEqual(len(observation.state["joint_torque_est_nm"]), 29)
@@ -84,20 +91,23 @@ class UnitreeG1LeRobotRuntimeTests(TestCase):
                             )
                         )
                         self.assertTrue(observation.state["imu"])
-                        self.assertTrue(all(np.isfinite(v) for v in observation.state["imu"].values()))
+                        self.assertTrue(
+                            all(np.isfinite(v) for v in observation.state["imu"].values())
+                        )
 
                         result = await robot.execute("reset")
                         self.assertTrue(result.ok)
                         self.assertTrue(result.data["is_simulation"])
                         self.assertIsNone(result.data["controller"])
                         self.assertEqual(result.data["simulation_dds_interface"], "auto")
+                        self.assertFalse(result.data["simulation_publish_images"])
 
                         after_reset = await robot.observe()
                         self.assertEqual(len(after_reset.state["joint_position_rad"]), 29)
                         self.assertTrue(
                             all(np.isfinite(v) for v in after_reset.state["joint_position_rad"].values())
                         )
-                        print(f"G1_LIFECYCLE_OK {lifecycle + 1}", flush=True)
+                        print(f"G1_HEADLESS_LIFECYCLE_OK {lifecycle + 1}", flush=True)
                     finally:
                         await robot.disconnect()
 
