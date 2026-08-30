@@ -104,6 +104,21 @@ async def _run_episode(label: str, sim_dt_s: float) -> dict[str, Any]:
             case.assertIn(path, (balance_path, walk_path))
             return str(path)
 
+        # EnvHub step() performs exactly one MuJoCo step and explicitly leaves
+        # timing to its caller. LeRobot's UnitreeG1 caller is pinned to 4 ms by
+        # UnitreeG1Config.control_dt, so changing only SIMULATE_DT would still
+        # execute about five physics calls per 20 ms GR00T update. The reference
+        # profile must change the caller interval and MuJoCo dt together to model
+        # NVIDIA's 5 ms simulation / 20 ms policy cadence truthfully.
+        base_robot_factory = UnitreeG1LeRobot._load_default_robot_factory()
+
+        def simulation_timing_factory(**kwargs: Any) -> Any:
+            native_robot = base_robot_factory(**kwargs)
+            case.assertAlmostEqual(float(native_robot.control_dt), PINNED_ENVHUB_DT_S)
+            native_robot.control_dt = sim_dt_s
+            native_robot.config.control_dt = sim_dt_s
+            return native_robot
+
         with (
             patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
             patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
@@ -116,6 +131,7 @@ async def _run_episode(label: str, sim_dt_s: float) -> dict[str, Any]:
                 controller="GrootLocomotionController",
                 gravity_compensation=False,
                 simulation_dds_interface=None,
+                robot_factory=simulation_timing_factory,
             )
             await robot.connect()
             try:
@@ -127,6 +143,9 @@ async def _run_episode(label: str, sim_dt_s: float) -> dict[str, Any]:
                 inner_env = native.sim_env.sim_env
 
                 case.assertFalse(inner_env.config["ENABLE_ELASTIC_BAND"])
+                case.assertFalse(native.sim_env.camera_configs)
+                case.assertAlmostEqual(float(native.control_dt), sim_dt_s)
+                case.assertAlmostEqual(float(native.config.control_dt), sim_dt_s)
                 case.assertAlmostEqual(float(native.controller.control_dt), GROOT_CONTROL_DT_S)
                 case.assertAlmostEqual(float(simulator.sim_dt), sim_dt_s)
                 case.assertAlmostEqual(float(inner_env.sim_dt), sim_dt_s)
@@ -213,6 +232,7 @@ async def _run_episode(label: str, sim_dt_s: float) -> dict[str, Any]:
                 result = {
                     "timestep_profile": label,
                     "sim_dt_s": sim_dt_s,
+                    "simulation_loop_dt_s": float(native.control_dt),
                     "sim_frequency_hz": 1.0 / sim_dt_s,
                     "control_dt_s": GROOT_CONTROL_DT_S,
                     "physics_steps_per_policy_update": GROOT_CONTROL_DT_S / sim_dt_s,
