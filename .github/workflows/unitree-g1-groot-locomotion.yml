@@ -174,12 +174,17 @@ jobs:
 
           env_file = Path(os.environ["UNITREE_G1_ENV_ROOT"]) / "env.py"
           text = env_file.read_text(encoding="utf-8")
-          needle = "publish_images=True"
-          count = text.count(needle)
-          if count != 1:
-              raise SystemExit(f"expected exactly one {needle!r} in pinned EnvHub env.py, found {count}")
-          env_file.write_text(text.replace(needle, "publish_images=False", 1), encoding="utf-8")
-          print("Disabled EnvHub image publishing for timestep-only timing fidelity")
+          candidates = (
+              ('kwargs.get("publish_images", True)', 'kwargs.get("publish_images", False)'),
+              ("publish_images=True", "publish_images=False"),
+          )
+          matches = [(old, new, text.count(old)) for old, new in candidates if text.count(old)]
+          if sum(count for _, _, count in matches) != 1:
+              detail = {old: text.count(old) for old, _ in candidates}
+              raise SystemExit(f"expected exactly one image-publishing default in pinned EnvHub env.py: {detail}")
+          old, new, _ = matches[0]
+          env_file.write_text(text.replace(old, new, 1), encoding="utf-8")
+          print(f"Disabled EnvHub image publishing for timestep-only timing fidelity via {old!r}")
           PY
       - name: Run GR00T physics-timestep A/B characterization
         id: timestep_ab
