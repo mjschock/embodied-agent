@@ -73,7 +73,8 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
             for path in (env_file, config_path, balance_path, walk_path):
                 self.assertTrue(path.exists(), path)
 
-            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            original_config_text = config_path.read_text(encoding="utf-8")
+            config = yaml.safe_load(original_config_text)
             config.update(
                 {
                     "ENABLE_ONSCREEN": False,
@@ -101,20 +102,19 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                 self.assertIn(path, (balance_path, walk_path))
                 return str(path)
 
-            robot = UnitreeG1LeRobot(
-                name="g1",
-                is_simulation=True,
-                controller="GrootLocomotionController",
-                gravity_compensation=False,
-                simulation_dds_interface=None,
-            )
-
-            with (
-                patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
-                patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
-                patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
-                patch.object(groot_locomotion, "hf_hub_download", side_effect=pinned_policy_download),
-            ):
+            async def run_forward_episode(remote_ly: float) -> dict[str, Any]:
+                # EnvHub advances MuJoCo on a background thread. Its native reset
+                # mutates mjData without synchronizing against mj_step(), which can
+                # segfault or corrupt MuJoCo's stack. Give every command value a
+                # fresh simulator lifecycle instead. PR #42 validates repeated
+                # same-process G1 connect/disconnect lifecycles.
+                robot = UnitreeG1LeRobot(
+                    name="g1",
+                    is_simulation=True,
+                    controller="GrootLocomotionController",
+                    gravity_compensation=False,
+                    simulation_dds_interface=None,
+                )
                 await robot.connect()
                 try:
                     native = robot._robot
@@ -209,206 +209,213 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                             await asyncio.sleep(interval_s)
                         return samples
 
-                    async def run_forward_episode(remote_ly: float) -> dict[str, Any]:
-                        reset = await robot.execute("reset")
-                        self.assertTrue(reset.ok, reset.detail)
-                        stand = await robot.execute("stand")
-                        self.assertTrue(stand.ok, stand.detail)
+                    stand = await robot.execute("stand")
+                    self.assertTrue(stand.ok, stand.detail)
 
-                        # Give the reset balance policy time to establish the
-                        # untethered initial condition before measuring motion.
-                        pre_samples = await sample_pose(1.0)
-                        start = pre_samples[-1]
+                    # Let the balance policy establish the untethered initial
+                    # condition before measuring motion.
+                    pre_samples = await sample_pose(1.0)
+                    start = pre_samples[-1]
 
-                        command = dict(REMOTE_ZERO)
-                        command["remote.ly"] = remote_ly
-                        balance_calls_before = balance_probe.run_calls
-                        walk_calls_before = walk_probe.run_calls
-                        native.send_action(command)
-                        command_duration_s = 2.0
-                        moving_samples = await sample_pose(
-                            command_duration_s,
-                            capture_controller=True,
+                    command = dict(REMOTE_ZERO)
+                    command["remote.ly"] = remote_ly
+                    balance_calls_before = balance_probe.run_calls
+                    walk_calls_before = walk_probe.run_calls
+                    native.send_action(command)
+                    command_duration_s = 2.0
+                    moving_samples = await sample_pose(
+                        command_duration_s,
+                        capture_controller=True,
+                    )
+                    end = moving_samples[-1]
+                    balance_policy_calls = balance_probe.run_calls - balance_calls_before
+                    walk_policy_calls = walk_probe.run_calls - walk_calls_before
+
+                    # Ignore only the first 200 ms when checking persisted command
+                    # delivery so the asynchronous 50 Hz controller gets several
+                    # cycles to consume the newly written controller_input.
+                    steady_controller_samples = moving_samples[10:]
+                    self.assertTrue(steady_controller_samples)
+                    input_errors = [
+                        abs(sample["controller_input_remote_ly"] - remote_ly)
+                        for sample in steady_controller_samples
+                    ]
+                    cmd_forward_errors = [
+                        abs(sample["controller_cmd_forward"] - remote_ly)
+                        for sample in steady_controller_samples
+                    ]
+                    cmd_cross_axis = [
+                        max(
+                            abs(sample["controller_cmd_lateral"]),
+                            abs(sample["controller_cmd_yaw"]),
                         )
-                        end = moving_samples[-1]
-                        balance_policy_calls = balance_probe.run_calls - balance_calls_before
-                        walk_policy_calls = walk_probe.run_calls - walk_calls_before
+                        for sample in steady_controller_samples
+                    ]
+                    self.assertLessEqual(max(input_errors), 1e-12)
+                    self.assertLessEqual(max(cmd_forward_errors), 1e-6)
+                    self.assertLessEqual(max(cmd_cross_axis), 1e-9)
+                    self.assertTrue(
+                        all(
+                            sample["controller_output_count"] == 15
+                            for sample in steady_controller_samples
+                        )
+                    )
+                    if abs(remote_ly) < 0.05:
+                        self.assertGreater(balance_policy_calls, 0)
+                        self.assertEqual(walk_policy_calls, 0)
+                    else:
+                        self.assertGreater(walk_policy_calls, 0)
 
-                        # Ignore only the first 200 ms when checking persisted command
-                        # delivery so the asynchronous 50 Hz controller gets several
-                        # cycles to consume the newly written controller_input.
-                        steady_controller_samples = moving_samples[10:]
-                        self.assertTrue(steady_controller_samples)
-                        input_errors = [
-                            abs(sample["controller_input_remote_ly"] - remote_ly)
-                            for sample in steady_controller_samples
-                        ]
-                        cmd_forward_errors = [
-                            abs(sample["controller_cmd_forward"] - remote_ly)
-                            for sample in steady_controller_samples
-                        ]
-                        cmd_cross_axis = [
-                            max(
-                                abs(sample["controller_cmd_lateral"]),
-                                abs(sample["controller_cmd_yaw"]),
+                    controller_targets = np.asarray(
+                        [sample["controller_target_q"] for sample in steady_controller_samples],
+                        dtype=np.float64,
+                    )
+                    lowcmd_targets = np.asarray(
+                        [sample["lowcmd_target_q"] for sample in steady_controller_samples],
+                        dtype=np.float64,
+                    )
+                    body_q = np.asarray(
+                        [sample["body_q"] for sample in steady_controller_samples],
+                        dtype=np.float64,
+                    )
+                    body_dq = np.asarray(
+                        [sample["body_dq"] for sample in steady_controller_samples],
+                        dtype=np.float64,
+                    )
+                    self.assertEqual(controller_targets.shape[1], 15)
+                    self.assertEqual(lowcmd_targets.shape, controller_targets.shape)
+                    self.assertEqual(body_q.shape, controller_targets.shape)
+                    self.assertEqual(body_dq.shape, controller_targets.shape)
+
+                    # Return to the public semantic standing boundary after every
+                    # internal calibration command before ending this lifecycle.
+                    stopped = await robot.execute("stand")
+                    self.assertTrue(stopped.ok, stopped.detail)
+                    post_samples = await sample_pose(0.5)
+
+                    initial_yaw = start["yaw_rad"]
+                    dx = end["x_m"] - start["x_m"]
+                    dy = end["y_m"] - start["y_m"]
+                    forward_m = math.cos(initial_yaw) * dx + math.sin(initial_yaw) * dy
+                    lateral_m = -math.sin(initial_yaw) * dx + math.cos(initial_yaw) * dy
+                    yaw_delta = _wrap_angle(end["yaw_rad"] - initial_yaw)
+                    all_samples = pre_samples + moving_samples + post_samples
+
+                    with native._controller_action_lock:
+                        controller_input = dict(native.controller_input)
+                    self.assertEqual(
+                        {key: float(controller_input[key]) for key in REMOTE_ZERO},
+                        REMOTE_ZERO,
+                    )
+                    self.assertTrue(np.allclose(native.controller.cmd, np.zeros(3), atol=0.0))
+
+                    return {
+                        "remote_ly": remote_ly,
+                        "command_duration_s": command_duration_s,
+                        "forward_displacement_m": forward_m,
+                        "lateral_displacement_m": lateral_m,
+                        "mean_forward_mps": forward_m / command_duration_s,
+                        "mean_lateral_mps": lateral_m / command_duration_s,
+                        "yaw_delta_rad": yaw_delta,
+                        "mean_yaw_rate_rps": yaw_delta / command_duration_s,
+                        "start_xyz_m": [start["x_m"], start["y_m"], start["z_m"]],
+                        "end_xyz_m": [end["x_m"], end["y_m"], end["z_m"]],
+                        "min_height_m": min(sample["z_m"] for sample in all_samples),
+                        "max_tilt_rad": max(sample["tilt_rad"] for sample in all_samples),
+                        "pre_drift_m": math.hypot(
+                            pre_samples[-1]["x_m"] - pre_samples[0]["x_m"],
+                            pre_samples[-1]["y_m"] - pre_samples[0]["y_m"],
+                        ),
+                        "post_drift_m": math.hypot(
+                            post_samples[-1]["x_m"] - post_samples[0]["x_m"],
+                            post_samples[-1]["y_m"] - post_samples[0]["y_m"],
+                        ),
+                        "balance_policy_calls": balance_policy_calls,
+                        "walk_policy_calls": walk_policy_calls,
+                        "max_controller_input_error": max(input_errors),
+                        "max_controller_cmd_forward_error": max(cmd_forward_errors),
+                        "max_controller_cmd_cross_axis": max(cmd_cross_axis),
+                        "mean_groot_action_l2": float(
+                            np.mean(
+                                [
+                                    sample["groot_action_l2"]
+                                    for sample in steady_controller_samples
+                                ]
                             )
+                        ),
+                        "max_groot_action_l2": max(
+                            sample["groot_action_l2"]
                             for sample in steady_controller_samples
-                        ]
-                        self.assertLessEqual(max(input_errors), 1e-12)
-                        self.assertLessEqual(max(cmd_forward_errors), 1e-6)
-                        self.assertLessEqual(max(cmd_cross_axis), 1e-9)
-                        self.assertTrue(
-                            all(
-                                sample["controller_output_count"] == 15
-                                for sample in steady_controller_samples
+                        ),
+                        "mean_controller_output_l2": float(
+                            np.mean(
+                                [
+                                    sample["controller_output_l2"]
+                                    for sample in steady_controller_samples
+                                ]
                             )
-                        )
-                        if abs(remote_ly) < 0.05:
-                            self.assertGreater(balance_policy_calls, 0)
-                            self.assertEqual(walk_policy_calls, 0)
-                        else:
-                            self.assertGreater(walk_policy_calls, 0)
+                        ),
+                        "controller_target_temporal_std_l2_rad": float(
+                            np.linalg.norm(np.std(controller_targets, axis=0))
+                        ),
+                        "controller_target_peak_to_peak_l2_rad": float(
+                            np.linalg.norm(np.ptp(controller_targets, axis=0))
+                        ),
+                        "lowcmd_target_temporal_std_l2_rad": float(
+                            np.linalg.norm(np.std(lowcmd_targets, axis=0))
+                        ),
+                        "lowcmd_target_peak_to_peak_l2_rad": float(
+                            np.linalg.norm(np.ptp(lowcmd_targets, axis=0))
+                        ),
+                        "lowcmd_vs_controller_target_rms_rad": _rms(
+                            lowcmd_targets - controller_targets
+                        ),
+                        "body_q_temporal_std_l2_rad": float(
+                            np.linalg.norm(np.std(body_q, axis=0))
+                        ),
+                        "body_q_peak_to_peak_l2_rad": float(
+                            np.linalg.norm(np.ptp(body_q, axis=0))
+                        ),
+                        "body_dq_rms_rad_s": _rms(body_dq),
+                        "body_q_tracking_rms_rad": _rms(body_q - lowcmd_targets),
+                    }
+                finally:
+                    await robot.disconnect()
 
-                        controller_targets = np.asarray(
-                            [sample["controller_target_q"] for sample in steady_controller_samples],
-                            dtype=np.float64,
-                        )
-                        lowcmd_targets = np.asarray(
-                            [sample["lowcmd_target_q"] for sample in steady_controller_samples],
-                            dtype=np.float64,
-                        )
-                        body_q = np.asarray(
-                            [sample["body_q"] for sample in steady_controller_samples],
-                            dtype=np.float64,
-                        )
-                        body_dq = np.asarray(
-                            [sample["body_dq"] for sample in steady_controller_samples],
-                            dtype=np.float64,
-                        )
-                        self.assertEqual(controller_targets.shape[1], 15)
-                        self.assertEqual(lowcmd_targets.shape, controller_targets.shape)
-                        self.assertEqual(body_q.shape, controller_targets.shape)
-                        self.assertEqual(body_dq.shape, controller_targets.shape)
-
-                        # Return to the public semantic standing boundary after
-                        # every internal calibration command.
-                        stopped = await robot.execute("stand")
-                        self.assertTrue(stopped.ok, stopped.detail)
-                        post_samples = await sample_pose(0.5)
-
-                        initial_yaw = start["yaw_rad"]
-                        dx = end["x_m"] - start["x_m"]
-                        dy = end["y_m"] - start["y_m"]
-                        forward_m = math.cos(initial_yaw) * dx + math.sin(initial_yaw) * dy
-                        lateral_m = -math.sin(initial_yaw) * dx + math.cos(initial_yaw) * dy
-                        yaw_delta = _wrap_angle(end["yaw_rad"] - initial_yaw)
-                        all_samples = pre_samples + moving_samples + post_samples
-
-                        with native._controller_action_lock:
-                            controller_input = dict(native.controller_input)
-                        self.assertEqual(
-                            {key: float(controller_input[key]) for key in REMOTE_ZERO},
-                            REMOTE_ZERO,
-                        )
-                        self.assertTrue(np.allclose(native.controller.cmd, np.zeros(3), atol=0.0))
-
-                        return {
-                            "remote_ly": remote_ly,
-                            "command_duration_s": command_duration_s,
-                            "forward_displacement_m": forward_m,
-                            "lateral_displacement_m": lateral_m,
-                            "mean_forward_mps": forward_m / command_duration_s,
-                            "mean_lateral_mps": lateral_m / command_duration_s,
-                            "yaw_delta_rad": yaw_delta,
-                            "mean_yaw_rate_rps": yaw_delta / command_duration_s,
-                            "start_xyz_m": [start["x_m"], start["y_m"], start["z_m"]],
-                            "end_xyz_m": [end["x_m"], end["y_m"], end["z_m"]],
-                            "min_height_m": min(sample["z_m"] for sample in all_samples),
-                            "max_tilt_rad": max(sample["tilt_rad"] for sample in all_samples),
-                            "pre_drift_m": math.hypot(
-                                pre_samples[-1]["x_m"] - pre_samples[0]["x_m"],
-                                pre_samples[-1]["y_m"] - pre_samples[0]["y_m"],
-                            ),
-                            "post_drift_m": math.hypot(
-                                post_samples[-1]["x_m"] - post_samples[0]["x_m"],
-                                post_samples[-1]["y_m"] - post_samples[0]["y_m"],
-                            ),
-                            "balance_policy_calls": balance_policy_calls,
-                            "walk_policy_calls": walk_policy_calls,
-                            "max_controller_input_error": max(input_errors),
-                            "max_controller_cmd_forward_error": max(cmd_forward_errors),
-                            "max_controller_cmd_cross_axis": max(cmd_cross_axis),
-                            "mean_groot_action_l2": float(
-                                np.mean(
-                                    [
-                                        sample["groot_action_l2"]
-                                        for sample in steady_controller_samples
-                                    ]
-                                )
-                            ),
-                            "max_groot_action_l2": max(
-                                sample["groot_action_l2"]
-                                for sample in steady_controller_samples
-                            ),
-                            "mean_controller_output_l2": float(
-                                np.mean(
-                                    [
-                                        sample["controller_output_l2"]
-                                        for sample in steady_controller_samples
-                                    ]
-                                )
-                            ),
-                            "controller_target_temporal_std_l2_rad": float(
-                                np.linalg.norm(np.std(controller_targets, axis=0))
-                            ),
-                            "controller_target_peak_to_peak_l2_rad": float(
-                                np.linalg.norm(np.ptp(controller_targets, axis=0))
-                            ),
-                            "lowcmd_target_temporal_std_l2_rad": float(
-                                np.linalg.norm(np.std(lowcmd_targets, axis=0))
-                            ),
-                            "lowcmd_target_peak_to_peak_l2_rad": float(
-                                np.linalg.norm(np.ptp(lowcmd_targets, axis=0))
-                            ),
-                            "lowcmd_vs_controller_target_rms_rad": _rms(
-                                lowcmd_targets - controller_targets
-                            ),
-                            "body_q_temporal_std_l2_rad": float(
-                                np.linalg.norm(np.std(body_q, axis=0))
-                            ),
-                            "body_q_peak_to_peak_l2_rad": float(
-                                np.linalg.norm(np.ptp(body_q, axis=0))
-                            ),
-                            "body_dq_rms_rad_s": _rms(body_dq),
-                            "body_q_tracking_rms_rad": _rms(body_q - lowcmd_targets),
-                        }
-
+            try:
+                with (
+                    patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
+                    patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
+                    patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
+                    patch.object(groot_locomotion, "hf_hub_download", side_effect=pinned_policy_download),
+                ):
                     results = [
                         await run_forward_episode(value)
                         for value in (0.0, 0.10, 0.25, 0.50)
                     ]
-                    print(
-                        "GROOT_LOCOMOTION_CHARACTERIZATION "
-                        + json.dumps(results, sort_keys=True),
-                        flush=True,
-                    )
+            finally:
+                config_path.write_text(original_config_text, encoding="utf-8")
 
-                    # This remains a characterization gate, not an SI calibration.
-                    # Require the real command/policy pipeline plus a finite,
-                    # non-collapsed untethered simulation. World-pose response and
-                    # lower-body target/tracking activity are recorded so any future
-                    # locomotion claim comes from measured actuation, not assumptions.
-                    for result in results:
-                        numeric = [
-                            value
-                            for value in result.values()
-                            if isinstance(value, (int, float))
-                        ]
-                        self.assertTrue(all(math.isfinite(float(value)) for value in numeric))
-                        self.assertGreater(result["min_height_m"], 0.2)
-                        self.assertLess(result["max_tilt_rad"], 1.0)
-                finally:
-                    await robot.disconnect()
+            print(
+                "GROOT_LOCOMOTION_CHARACTERIZATION "
+                + json.dumps(results, sort_keys=True),
+                flush=True,
+            )
+
+            # This remains a characterization gate, not an SI calibration.
+            # Require the real command/policy pipeline plus a finite,
+            # non-collapsed untethered simulation. World-pose response and
+            # lower-body target/tracking activity are recorded so any future
+            # locomotion claim comes from measured actuation, not assumptions.
+            for result in results:
+                numeric = [
+                    value
+                    for value in result.values()
+                    if isinstance(value, (int, float))
+                ]
+                self.assertTrue(all(math.isfinite(float(value)) for value in numeric))
+                self.assertGreater(result["min_height_m"], 0.2)
+                self.assertLess(result["max_tilt_rad"], 1.0)
 
         asyncio.run(scenario())
 

@@ -54,7 +54,8 @@ class UnitreeG1GrootPreprocessingCharacterizationTests(TestCase):
             for path in (env_file, config_path, balance_path, walk_path):
                 self.assertTrue(path.exists(), path)
 
-            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            original_config_text = config_path.read_text(encoding="utf-8")
+            config = yaml.safe_load(original_config_text)
             config.update(
                 {
                     "ENABLE_ONSCREEN": False,
@@ -87,20 +88,27 @@ class UnitreeG1GrootPreprocessingCharacterizationTests(TestCase):
                 self.assertIn(path, (balance_path, walk_path))
                 return str(path)
 
-            robot = UnitreeG1LeRobot(
-                name="g1",
-                is_simulation=True,
-                controller="GrootLocomotionController",
-                gravity_compensation=False,
-                simulation_dds_interface=None,
-            )
-
-            with (
-                patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
-                patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
-                patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
-                patch.object(groot_locomotion, "hf_hub_download", side_effect=pinned_policy_download),
-            ):
+            async def episode(
+                *,
+                preprocessing: str,
+                ang_vel_scale: float,
+                yaw_cmd_scale: float,
+                remote_ly: float,
+            ) -> dict[str, Any]:
+                # EnvHub runs MuJoCo on its own thread. Its native reset mutates
+                # mjData without synchronizing against mj_step(), which can segfault.
+                # A fresh simulator lifecycle gives each A/B episode the intended
+                # initial state without racing the physics thread. PR #42 validates
+                # repeated same-process G1 connect/disconnect lifecycles.
+                groot_locomotion.ANG_VEL_SCALE = ang_vel_scale
+                groot_locomotion.CMD_SCALE = [2.0, 2.0, yaw_cmd_scale]
+                robot = UnitreeG1LeRobot(
+                    name="g1",
+                    is_simulation=True,
+                    controller="GrootLocomotionController",
+                    gravity_compensation=False,
+                    simulation_dds_interface=None,
+                )
                 await robot.connect()
                 try:
                     native = robot._robot
@@ -110,7 +118,10 @@ class UnitreeG1GrootPreprocessingCharacterizationTests(TestCase):
                     inner_env = native.sim_env.sim_env
                     self.assertFalse(inner_env.config["ENABLE_ELASTIC_BAND"])
 
-                    async def sample(duration_s: float, interval_s: float = 0.02) -> list[dict[str, Any]]:
+                    async def sample(
+                        duration_s: float,
+                        interval_s: float = 0.02,
+                    ) -> list[dict[str, Any]]:
                         samples: list[dict[str, Any]] = []
                         for _ in range(max(1, int(round(duration_s / interval_s)))):
                             raw = inner_env.prepare_obs()
@@ -134,8 +145,6 @@ class UnitreeG1GrootPreprocessingCharacterizationTests(TestCase):
                                     "x_m": float(pose[0]),
                                     "y_m": float(pose[1]),
                                     "z_m": float(pose[2]),
-                                    "roll_rad": roll,
-                                    "pitch_rad": pitch,
                                     "yaw_rad": yaw,
                                     "tilt_rad": math.hypot(roll, pitch),
                                     "body_q": body_q,
@@ -148,82 +157,76 @@ class UnitreeG1GrootPreprocessingCharacterizationTests(TestCase):
                             await asyncio.sleep(interval_s)
                         return samples
 
-                    async def episode(
-                        *,
-                        preprocessing: str,
-                        ang_vel_scale: float,
-                        yaw_cmd_scale: float,
-                        remote_ly: float,
-                    ) -> dict[str, Any]:
-                        groot_locomotion.ANG_VEL_SCALE = ang_vel_scale
-                        groot_locomotion.CMD_SCALE = [2.0, 2.0, yaw_cmd_scale]
+                    stand = await robot.execute("stand")
+                    self.assertTrue(stand.ok, stand.detail)
+                    pre = await sample(1.0)
+                    start = pre[-1]
 
-                        reset = await robot.execute("reset")
-                        self.assertTrue(reset.ok, reset.detail)
-                        stand = await robot.execute("stand")
-                        self.assertTrue(stand.ok, stand.detail)
-                        pre = await sample(1.0)
-                        start = pre[-1]
+                    action = dict(REMOTE_ZERO)
+                    action["remote.ly"] = remote_ly
+                    native.send_action(action)
+                    moving = await sample(2.0)
+                    end = moving[-1]
+                    steady = moving[10:]
+                    self.assertTrue(steady)
+                    self.assertLessEqual(
+                        max(abs(s["controller_input_remote_ly"] - remote_ly) for s in steady),
+                        1e-12,
+                    )
+                    self.assertLessEqual(
+                        max(abs(s["controller_cmd_forward"] - remote_ly) for s in steady),
+                        1e-6,
+                    )
 
-                        action = dict(REMOTE_ZERO)
-                        action["remote.ly"] = remote_ly
-                        native.send_action(action)
-                        moving = await sample(2.0)
-                        end = moving[-1]
-                        steady = moving[10:]
-                        self.assertTrue(steady)
-                        self.assertLessEqual(
-                            max(abs(s["controller_input_remote_ly"] - remote_ly) for s in steady),
-                            1e-12,
-                        )
-                        self.assertLessEqual(
-                            max(abs(s["controller_cmd_forward"] - remote_ly) for s in steady),
-                            1e-6,
-                        )
+                    stopped = await robot.execute("stand")
+                    self.assertTrue(stopped.ok, stopped.detail)
+                    post = await sample(0.5)
+                    self.assertTrue(np.allclose(native.controller.cmd, np.zeros(3), atol=0.0))
 
-                        stopped = await robot.execute("stand")
-                        self.assertTrue(stopped.ok, stopped.detail)
-                        post = await sample(0.5)
-                        self.assertTrue(np.allclose(native.controller.cmd, np.zeros(3), atol=0.0))
+                    initial_yaw = start["yaw_rad"]
+                    dx = end["x_m"] - start["x_m"]
+                    dy = end["y_m"] - start["y_m"]
+                    forward_m = math.cos(initial_yaw) * dx + math.sin(initial_yaw) * dy
+                    lateral_m = -math.sin(initial_yaw) * dx + math.cos(initial_yaw) * dy
+                    yaw_delta = _wrap_angle(end["yaw_rad"] - initial_yaw)
+                    all_samples = pre + moving + post
+                    body_q = np.asarray([s["body_q"] for s in steady], dtype=np.float64)
+                    body_dq = np.asarray([s["body_dq"] for s in steady], dtype=np.float64)
+                    outputs = [s["controller_output"] for s in steady if s["controller_output"].size == 15]
+                    self.assertTrue(outputs)
+                    controller_outputs = np.asarray(outputs, dtype=np.float64)
 
-                        initial_yaw = start["yaw_rad"]
-                        dx = end["x_m"] - start["x_m"]
-                        dy = end["y_m"] - start["y_m"]
-                        forward_m = math.cos(initial_yaw) * dx + math.sin(initial_yaw) * dy
-                        lateral_m = -math.sin(initial_yaw) * dx + math.cos(initial_yaw) * dy
-                        yaw_delta = _wrap_angle(end["yaw_rad"] - initial_yaw)
-                        all_samples = pre + moving + post
-                        body_q = np.asarray([s["body_q"] for s in steady], dtype=np.float64)
-                        body_dq = np.asarray([s["body_dq"] for s in steady], dtype=np.float64)
-                        outputs = [s["controller_output"] for s in steady if s["controller_output"].size == 15]
-                        self.assertTrue(outputs)
-                        controller_outputs = np.asarray(outputs, dtype=np.float64)
+                    return {
+                        "preprocessing": preprocessing,
+                        "ang_vel_scale": ang_vel_scale,
+                        "yaw_cmd_scale": yaw_cmd_scale,
+                        "remote_ly": remote_ly,
+                        "forward_displacement_m": forward_m,
+                        "mean_forward_mps": forward_m / 2.0,
+                        "lateral_displacement_m": lateral_m,
+                        "yaw_delta_rad": yaw_delta,
+                        "min_height_m": min(s["z_m"] for s in all_samples),
+                        "max_tilt_rad": max(s["tilt_rad"] for s in all_samples),
+                        "pre_drift_m": math.hypot(
+                            pre[-1]["x_m"] - pre[0]["x_m"],
+                            pre[-1]["y_m"] - pre[0]["y_m"],
+                        ),
+                        "body_q_peak_to_peak_l2_rad": float(np.linalg.norm(np.ptp(body_q, axis=0))),
+                        "body_dq_rms_rad_s": float(np.sqrt(np.mean(np.square(body_dq)))),
+                        "controller_target_peak_to_peak_l2_rad": float(
+                            np.linalg.norm(np.ptp(controller_outputs, axis=0))
+                        ),
+                    }
+                finally:
+                    await robot.disconnect()
 
-                        return {
-                            "preprocessing": preprocessing,
-                            "ang_vel_scale": ang_vel_scale,
-                            "yaw_cmd_scale": yaw_cmd_scale,
-                            "remote_ly": remote_ly,
-                            "forward_displacement_m": forward_m,
-                            "mean_forward_mps": forward_m / 2.0,
-                            "lateral_displacement_m": lateral_m,
-                            "yaw_delta_rad": yaw_delta,
-                            "min_height_m": min(s["z_m"] for s in all_samples),
-                            "max_tilt_rad": max(s["tilt_rad"] for s in all_samples),
-                            "pre_drift_m": math.hypot(
-                                pre[-1]["x_m"] - pre[0]["x_m"],
-                                pre[-1]["y_m"] - pre[0]["y_m"],
-                            ),
-                            "body_q_peak_to_peak_l2_rad": float(np.linalg.norm(np.ptp(body_q, axis=0))),
-                            "body_dq_rms_rad_s": float(np.sqrt(np.mean(np.square(body_dq)))),
-                            "controller_target_peak_to_peak_l2_rad": float(
-                                np.linalg.norm(np.ptp(controller_outputs, axis=0))
-                            ),
-                        }
-
-                    # The zero-command baseline is already measured by the main
-                    # locomotion characterization. This A/B isolates only the motion
-                    # command where the preprocessing discrepancy could matter.
+            try:
+                with (
+                    patch.object(env_utils, "hf_hub_download", return_value=str(env_file)),
+                    patch.object(env_utils, "snapshot_download", return_value=str(env_root)),
+                    patch.object(huggingface_hub, "snapshot_download", return_value=str(env_root)),
+                    patch.object(groot_locomotion, "hf_hub_download", side_effect=pinned_policy_download),
+                ):
                     remote_ly = 0.50
                     results = [
                         await episode(
@@ -239,25 +242,17 @@ class UnitreeG1GrootPreprocessingCharacterizationTests(TestCase):
                             remote_ly=remote_ly,
                         ),
                     ]
+            finally:
+                groot_locomotion.ANG_VEL_SCALE = original_ang_vel_scale
+                groot_locomotion.CMD_SCALE = original_cmd_scale
+                config_path.write_text(original_config_text, encoding="utf-8")
 
-                    print(
-                        "GROOT_PREPROCESSING_AB " + json.dumps(results, sort_keys=True),
-                        flush=True,
-                    )
-
-                    for result in results:
-                        numeric = [
-                            value
-                            for value in result.values()
-                            if isinstance(value, (int, float))
-                        ]
-                        self.assertTrue(all(math.isfinite(float(value)) for value in numeric))
-                        self.assertGreater(result["min_height_m"], 0.2)
-                        self.assertLess(result["max_tilt_rad"], 1.0)
-                finally:
-                    groot_locomotion.ANG_VEL_SCALE = original_ang_vel_scale
-                    groot_locomotion.CMD_SCALE = original_cmd_scale
-                    await robot.disconnect()
+            print("GROOT_PREPROCESSING_AB " + json.dumps(results, sort_keys=True), flush=True)
+            for result in results:
+                numeric = [value for value in result.values() if isinstance(value, (int, float))]
+                self.assertTrue(all(math.isfinite(float(value)) for value in numeric))
+                self.assertGreater(result["min_height_m"], 0.2)
+                self.assertLess(result["max_tilt_rad"], 1.0)
 
         asyncio.run(scenario())
 
