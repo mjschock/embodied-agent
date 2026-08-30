@@ -298,13 +298,14 @@ class UnitreeG1LeRobot(Embodiment):
 
         LeRobot's string-based Hub environment API calls a remote module's
         ``make_env`` without forwarding arbitrary keyword arguments. The pinned G1
-        EnvHub module exposes ``publish_images`` and defaults it to true. Temporarily
-        replacing LeRobot's internal Hub-module call lets this adapter request a
-        control-only headless environment without editing the downloaded Hub source.
+        EnvHub module accepts ``publish_images`` through its keyword arguments and
+        defaults it to true. Temporarily replacing LeRobot's internal Hub-module call
+        lets this adapter request a control-only headless environment without editing
+        the downloaded Hub source.
 
         The override is serialized and restored before ``connect`` returns. It fails
         loudly if no Hub call was intercepted or if the remote contract no longer
-        exposes ``publish_images``.
+        accepts ``publish_images``.
         """
 
         try:
@@ -327,9 +328,13 @@ class UnitreeG1LeRobot(Embodiment):
                 if not callable(entry_fn):
                     return original_call_make_env(module, n_envs, use_async_envs, cfg)
                 parameters = inspect.signature(entry_fn).parameters
-                if "publish_images" not in parameters:
+                accepts_publish_images = "publish_images" in parameters or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in parameters.values()
+                )
+                if not accepts_publish_images:
                     raise RuntimeError(
-                        "Pinned Unitree G1 EnvHub make_env no longer exposes publish_images"
+                        "Pinned Unitree G1 EnvHub make_env no longer accepts publish_images"
                     )
                 intercepted_calls += 1
                 return entry_fn(
