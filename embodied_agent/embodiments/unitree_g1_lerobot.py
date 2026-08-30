@@ -114,6 +114,12 @@ class UnitreeG1LeRobot(Embodiment):
             )
         else:
             robot.connect()
+        if use_default_factory and self.is_simulation:
+            try:
+                self._serialize_simulation_step_and_reset(robot)
+            except BaseException:
+                self._cleanup_failed_simulation_connect(robot)
+                raise
         self._robot = robot
 
     async def disconnect(self) -> None:
@@ -237,6 +243,54 @@ class UnitreeG1LeRobot(Embodiment):
             return original(domain_id, interface)
 
         robot._ChannelFactoryInitialize = initialize
+
+    @staticmethod
+    def _serialize_simulation_step_and_reset(robot: Any) -> None:
+        """Prevent pinned EnvHub reset from racing LeRobot's simulation step thread.
+
+        LeRobot v0.6.1 advances ``sim_env.step()`` from ``_subscribe_lowstate``
+        while its public ``reset()`` calls ``sim_env.reset()`` on the caller thread.
+        The pinned EnvHub implementation mutates the same MuJoCo ``mjData`` in both
+        paths without synchronization, which can trigger native MuJoCo failures.
+
+        Install a shared lock around those two calls, then wait until the background
+        state thread has executed one wrapped step. That barrier guarantees any step
+        that began before the wrappers were installed has finished before adapter
+        ``connect()`` returns and a semantic reset can be requested.
+        """
+
+        sim_env = getattr(robot, "sim_env", None)
+        if sim_env is None:
+            raise RuntimeError("Simulated Unitree G1 connected without a simulation environment")
+        original_step = getattr(sim_env, "step", None)
+        original_reset = getattr(sim_env, "reset", None)
+        if not callable(original_step) or not callable(original_reset):
+            raise RuntimeError("Unitree G1 simulation environment must expose step() and reset()")
+
+        simulation_lock = threading.RLock()
+        wrapped_step_seen = threading.Event()
+
+        def step(*args: Any, **kwargs: Any) -> Any:
+            with simulation_lock:
+                try:
+                    return original_step(*args, **kwargs)
+                finally:
+                    wrapped_step_seen.set()
+
+        def reset(*args: Any, **kwargs: Any) -> Any:
+            with simulation_lock:
+                return original_reset(*args, **kwargs)
+
+        sim_env.step = step
+        sim_env.reset = reset
+        barrier_timeout_s = max(3.0, 20.0 * float(getattr(robot, "control_dt", 0.004)))
+        if not wrapped_step_seen.wait(timeout=barrier_timeout_s):
+            sim_env.step = original_step
+            sim_env.reset = original_reset
+            raise RuntimeError(
+                "Unitree G1 simulation state thread did not reach the step/reset lock "
+                f"within {barrier_timeout_s:.1f}s"
+            )
 
     @staticmethod
     def _connect_with_simulation_image_option(robot: Any, *, publish_images: bool) -> None:
