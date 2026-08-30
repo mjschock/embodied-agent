@@ -164,6 +164,23 @@ jobs:
           path: ${{ runner.temp }}/groot_gain_ab_result.json
           if-no-files-found: error
           retention-days: 7
+      - name: Disable EnvHub camera publishing for timestep characterization
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          env_file = Path(os.environ["UNITREE_G1_ENV_ROOT"]) / "env.py"
+          text = env_file.read_text(encoding="utf-8")
+          needle = "publish_images=True"
+          count = text.count(needle)
+          if count != 1:
+              raise SystemExit(f"expected exactly one {needle!r} in pinned EnvHub env.py, found {count}")
+          env_file.write_text(text.replace(needle, "publish_images=False", 1), encoding="utf-8")
+          print("Disabled EnvHub image publishing for timestep-only timing fidelity")
+          PY
       - name: Run GR00T physics-timestep A/B characterization
         id: timestep_ab
         timeout-minutes: 4
