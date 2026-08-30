@@ -89,6 +89,10 @@ class UnitreeG1LeRobot(Embodiment):
     async def connect(self) -> None:
         if self._robot is not None:
             return
+        if self._robot_factory is not None and self.simulation_publish_images is not None:
+            raise RuntimeError(
+                "simulation_publish_images requires the default LeRobot Unitree G1 factory"
+            )
         use_default_factory = self._robot_factory is None
         factory = self._robot_factory or self._load_default_robot_factory()
         robot = factory(
