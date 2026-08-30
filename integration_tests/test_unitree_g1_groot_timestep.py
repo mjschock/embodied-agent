@@ -28,6 +28,8 @@ PINNED_ENVHUB_DT_S = 0.004
 NVIDIA_REFERENCE_DT_S = 0.005
 GROOT_CONTROL_DT_S = 0.020
 EPISODE_TIMEOUT_S = 45.0
+EPISODE_MEASURED_PREFIX = "GROOT_TIMESTEP_EPISODE_MEASURED "
+EPISODE_CLEAN_PREFIX = "GROOT_TIMESTEP_EPISODE_CLEAN "
 EPISODE_RESULT_PREFIX = "GROOT_TIMESTEP_EPISODE "
 LEROBOT_LOWER_BODY_KP = np.asarray(
     [150, 150, 150, 300, 40, 40, 150, 150, 150, 300, 40, 40, 250, 250, 250],
@@ -208,7 +210,7 @@ async def _run_episode(label: str, sim_dt_s: float) -> dict[str, Any]:
                 )
                 moving_sim_time_s = end["sim_time_s"] - moving[0]["sim_time_s"]
 
-                return {
+                result = {
                     "timestep_profile": label,
                     "sim_dt_s": sim_dt_s,
                     "sim_frequency_hz": 1.0 / sim_dt_s,
@@ -226,8 +228,29 @@ async def _run_episode(label: str, sim_dt_s: float) -> dict[str, Any]:
                     "body_q_peak_to_peak_l2_rad": float(np.linalg.norm(np.ptp(body_q, axis=0))),
                     "body_dq_rms_rad_s": float(np.sqrt(np.mean(np.square(body_dq)))),
                 }
+                numeric = [
+                    value for value in result.values() if isinstance(value, (int, float))
+                ]
+                case.assertTrue(all(math.isfinite(float(value)) for value in numeric))
+                case.assertGreater(result["min_height_m"], 0.2)
+                case.assertLess(result["max_tilt_rad"], 1.0)
+                case.assertGreater(result["body_q_peak_to_peak_l2_rad"], 0.1)
+                case.assertGreater(result["moving_sim_time_s"], 1.0)
+                print(
+                    EPISODE_MEASURED_PREFIX + json.dumps(result, sort_keys=True),
+                    flush=True,
+                )
+                return result
             finally:
                 await robot.disconnect()
+                print(
+                    EPISODE_CLEAN_PREFIX
+                    + json.dumps(
+                        {"timestep_profile": label, "sim_dt_s": sim_dt_s},
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
     finally:
         config_path.write_text(original_config_text, encoding="utf-8")
 
@@ -259,9 +282,23 @@ def _run_episode_subprocess(
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
         stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode(errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        measured_markers = [
+            line
+            for line in stdout.splitlines()
+            if line.startswith(EPISODE_MEASURED_PREFIX)
+        ]
+        clean_markers = [
+            line for line in stdout.splitlines() if line.startswith(EPISODE_CLEAN_PREFIX)
+        ]
         raise AssertionError(
             f"timestep episode {label} ({sim_dt_s}s) exceeded {EPISODE_TIMEOUT_S:.0f}s; "
-            f"stdout={stdout[-4000:]!r}; stderr={stderr[-4000:]!r}"
+            f"measured_markers={measured_markers[-1:]!r}; "
+            f"clean_markers={clean_markers[-1:]!r}; "
+            f"stdout_tail={stdout[-4000:]!r}; stderr_tail={stderr[-4000:]!r}"
         ) from exc
     finally:
         # A killed child may not reach its own finally block. Restore the pinned
@@ -274,17 +311,35 @@ def _run_episode_subprocess(
             f"stdout={completed.stdout[-4000:]!r}; stderr={completed.stderr[-4000:]!r}"
         )
 
+    measured_markers = [
+        line[len(EPISODE_MEASURED_PREFIX) :]
+        for line in completed.stdout.splitlines()
+        if line.startswith(EPISODE_MEASURED_PREFIX)
+    ]
+    clean_markers = [
+        line[len(EPISODE_CLEAN_PREFIX) :]
+        for line in completed.stdout.splitlines()
+        if line.startswith(EPISODE_CLEAN_PREFIX)
+    ]
     markers = [
         line[len(EPISODE_RESULT_PREFIX) :]
         for line in completed.stdout.splitlines()
         if line.startswith(EPISODE_RESULT_PREFIX)
     ]
-    if len(markers) != 1:
+    if len(measured_markers) != 1 or len(clean_markers) != 1 or len(markers) != 1:
         raise AssertionError(
-            f"timestep episode {label} ({sim_dt_s}s) emitted {len(markers)} result markers; "
-            f"stdout={completed.stdout[-4000:]!r}"
+            f"timestep episode {label} ({sim_dt_s}s) markers: "
+            f"measured={len(measured_markers)}, clean={len(clean_markers)}, "
+            f"result={len(markers)}; stdout={completed.stdout[-4000:]!r}"
         )
-    return json.loads(markers[0])
+    measured = json.loads(measured_markers[0])
+    result = json.loads(markers[0])
+    if measured != result:
+        raise AssertionError(
+            f"timestep episode {label} ({sim_dt_s}s) measured/result mismatch: "
+            f"measured={measured!r}; result={result!r}"
+        )
+    return result
 
 
 class UnitreeG1GrootTimestepCharacterizationTests(TestCase):
