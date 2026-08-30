@@ -103,17 +103,18 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                 return str(path)
 
             async def run_forward_episode(remote_ly: float) -> dict[str, Any]:
-                # EnvHub advances MuJoCo on a background thread. Its native reset
-                # mutates mjData without synchronizing against mj_step(), which can
-                # segfault or corrupt MuJoCo's stack. Give every command value a
-                # fresh simulator lifecycle instead. PR #42 validates repeated
-                # same-process G1 connect/disconnect lifecycles.
+                # Each normalized command gets a fresh simulator lifecycle so
+                # asynchronous DDS/controller state cannot leak between episodes.
+                # The control-only characterization explicitly disables EnvHub image
+                # publishing: PR #46 proves the camera publisher can throttle the
+                # state thread that advances MuJoCo far below realtime.
                 robot = UnitreeG1LeRobot(
                     name="g1",
                     is_simulation=True,
                     controller="GrootLocomotionController",
                     gravity_compensation=False,
                     simulation_dds_interface=None,
+                    simulation_publish_images=False,
                 )
                 await robot.connect()
                 try:
@@ -121,6 +122,7 @@ class UnitreeG1GrootLocomotionCharacterizationTests(TestCase):
                     self.assertIsNotNone(native)
                     self.assertIsNotNone(native.controller)
                     self.assertIsNotNone(native.sim_env)
+                    self.assertFalse(native.sim_env.camera_configs)
                     inner_env = native.sim_env.sim_env
                     self.assertFalse(inner_env.config["ENABLE_ELASTIC_BAND"])
 
