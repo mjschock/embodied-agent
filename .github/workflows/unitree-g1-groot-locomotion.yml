@@ -203,7 +203,7 @@ jobs:
 
           log = Path(os.environ["RUNNER_TEMP"]) / "groot_timestep_ab.log"
           prefix = "GROOT_TIMESTEP_AB "
-          matches = [line[len(prefix):] for line in log.read_text().splitlines() if line.startswith(prefix)]
+          matches = [line.split(prefix, 1)[1] for line in log.read_text().splitlines() if prefix in line]
           if len(matches) != 1:
               raise SystemExit(f"expected exactly one {prefix.strip()} record, found {len(matches)}")
           payload = json.loads(matches[0])
