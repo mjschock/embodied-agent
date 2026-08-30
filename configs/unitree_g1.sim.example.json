@@ -5,7 +5,9 @@
       "params": {
         "is_simulation": true,
         "controller": "GrootLocomotionController",
-        "gravity_compensation": false
+        "gravity_compensation": false,
+        "simulation_dds_interface": null,
+        "simulation_publish_images": false
       },
       "tools": ["observe", "reset", "stand"]
     }
