@@ -248,6 +248,19 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
         self.assertFalse(robot.simulation_publish_images)
         self.assertEqual(robot.capabilities, frozenset({Capability.OBSERVE, Capability.STAND}))
 
+    def test_explicit_image_option_rejects_custom_factory(self) -> None:
+        async def scenario() -> None:
+            native = FakeNativeG1()
+            robot = UnitreeG1LeRobot(
+                simulation_publish_images=False,
+                robot_factory=self._factory(native),
+            )
+            with self.assertRaisesRegex(RuntimeError, "requires the default LeRobot"):
+                await robot.connect()
+            self.assertEqual(native.connect_count, 0)
+
+        asyncio.run(scenario())
+
     def test_default_positions_and_simulation_option_validation(self) -> None:
         with self.assertRaisesRegex(ValueError, "exactly 29"):
             UnitreeG1LeRobot(default_positions=[0.0] * 28)
