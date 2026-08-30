@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+import threading
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -7,6 +9,7 @@ from embodied_agent.core import Capability, Embodiment, Observation, SkillReques
 
 
 NativeRobotFactory = Callable[..., Any]
+_SIMULATION_ENV_FACTORY_LOCK = threading.Lock()
 
 
 class UnitreeG1LeRobot(Embodiment):
@@ -24,6 +27,12 @@ class UnitreeG1LeRobot(Embodiment):
     explicit Unitree ``lo`` XML path aborts natively. ``simulation_dds_interface``
     therefore defaults to ``None`` (auto-detect) for simulated G1 instances only.
     Physical G1 initialization is left untouched.
+
+    The pinned LeRobot G1 path also loads EnvHub through the string-based Hub API,
+    which does not forward the EnvHub ``publish_images`` option. When
+    ``simulation_publish_images`` is explicitly set, the adapter temporarily wraps
+    LeRobot's Hub-module call during native ``connect()`` so the pinned G1 EnvHub
+    receives that option. ``None`` preserves upstream behavior exactly.
     """
 
     REMOTE_AXES = ("remote.lx", "remote.ly", "remote.rx", "remote.ry")
@@ -38,6 +47,7 @@ class UnitreeG1LeRobot(Embodiment):
         gravity_compensation: bool = False,
         default_positions: tuple[float, ...] | list[float] | None = None,
         simulation_dds_interface: str | None = None,
+        simulation_publish_images: bool | None = None,
         robot_factory: NativeRobotFactory | None = None,
     ) -> None:
         self.name = name
@@ -46,14 +56,26 @@ class UnitreeG1LeRobot(Embodiment):
         self.controller = controller
         self.robot_ip = robot_ip
         self.gravity_compensation = bool(gravity_compensation)
-        self.default_positions = None if default_positions is None else tuple(float(v) for v in default_positions)
+        self.default_positions = (
+            None if default_positions is None else tuple(float(v) for v in default_positions)
+        )
         if self.default_positions is not None and len(self.default_positions) != 29:
             raise ValueError("Unitree G1 default_positions must contain exactly 29 values")
         if simulation_dds_interface is not None:
             simulation_dds_interface = simulation_dds_interface.strip()
             if not simulation_dds_interface:
                 raise ValueError("simulation_dds_interface must be a non-empty string or null")
+        if (
+            simulation_publish_images is not None
+            and not isinstance(simulation_publish_images, bool)
+        ):
+            raise ValueError("simulation_publish_images must be true, false, or null")
+        if not self.is_simulation and simulation_publish_images is not None:
+            raise ValueError(
+                "simulation_publish_images is only valid for simulated Unitree G1 instances"
+            )
         self.simulation_dds_interface = simulation_dds_interface
+        self.simulation_publish_images = simulation_publish_images
         self._robot_factory = robot_factory
         self._robot: Any | None = None
 
@@ -67,6 +89,11 @@ class UnitreeG1LeRobot(Embodiment):
     async def connect(self) -> None:
         if self._robot is not None:
             return
+        if self._robot_factory is not None and self.simulation_publish_images is not None:
+            raise RuntimeError(
+                "simulation_publish_images requires the default LeRobot Unitree G1 factory"
+            )
+        use_default_factory = self._robot_factory is None
         factory = self._robot_factory or self._load_default_robot_factory()
         robot = factory(
             is_simulation=self.is_simulation,
@@ -76,7 +103,23 @@ class UnitreeG1LeRobot(Embodiment):
             default_positions=self.default_positions,
             simulation_dds_interface=self.simulation_dds_interface,
         )
-        robot.connect()
+        if (
+            use_default_factory
+            and self.is_simulation
+            and self.simulation_publish_images is not None
+        ):
+            self._connect_with_simulation_image_option(
+                robot,
+                publish_images=self.simulation_publish_images,
+            )
+        else:
+            robot.connect()
+        if use_default_factory and self.is_simulation:
+            try:
+                self._serialize_simulation_step_and_reset(robot)
+            except BaseException:
+                self._cleanup_failed_simulation_connect(robot)
+                raise
         self._robot = robot
 
     async def disconnect(self) -> None:
@@ -123,6 +166,9 @@ class UnitreeG1LeRobot(Embodiment):
             "is_simulation": self.is_simulation,
             "controller": self.controller,
             "simulation_dds_interface": self._simulation_dds_label(),
+            "simulation_publish_images": (
+                self.simulation_publish_images if self.is_simulation else None
+            ),
             "joint_position_rad": joint_position,
             "joint_velocity_rad_s": joint_velocity,
             "joint_torque_est_nm": joint_torque,
@@ -146,6 +192,9 @@ class UnitreeG1LeRobot(Embodiment):
                     "controller": self.controller,
                     "is_simulation": self.is_simulation,
                     "simulation_dds_interface": self._simulation_dds_label(),
+                    "simulation_publish_images": (
+                        self.simulation_publish_images if self.is_simulation else None
+                    ),
                 },
             )
 
@@ -194,6 +243,129 @@ class UnitreeG1LeRobot(Embodiment):
             return original(domain_id, interface)
 
         robot._ChannelFactoryInitialize = initialize
+
+    @staticmethod
+    def _serialize_simulation_step_and_reset(robot: Any) -> None:
+        """Prevent pinned EnvHub reset from racing LeRobot's simulation step thread.
+
+        LeRobot v0.6.1 advances ``sim_env.step()`` from ``_subscribe_lowstate``
+        while its public ``reset()`` calls ``sim_env.reset()`` on the caller thread.
+        The pinned EnvHub implementation mutates the same MuJoCo ``mjData`` in both
+        paths without synchronization, which can trigger native MuJoCo failures.
+
+        Install a shared lock around those two calls, then wait until the background
+        state thread has executed one wrapped step. That barrier guarantees any step
+        that began before the wrappers were installed has finished before adapter
+        ``connect()`` returns and a semantic reset can be requested.
+        """
+
+        sim_env = getattr(robot, "sim_env", None)
+        if sim_env is None:
+            raise RuntimeError("Simulated Unitree G1 connected without a simulation environment")
+        original_step = getattr(sim_env, "step", None)
+        original_reset = getattr(sim_env, "reset", None)
+        if not callable(original_step) or not callable(original_reset):
+            raise RuntimeError("Unitree G1 simulation environment must expose step() and reset()")
+
+        simulation_lock = threading.RLock()
+        wrapped_step_seen = threading.Event()
+
+        def step(*args: Any, **kwargs: Any) -> Any:
+            with simulation_lock:
+                try:
+                    return original_step(*args, **kwargs)
+                finally:
+                    wrapped_step_seen.set()
+
+        def reset(*args: Any, **kwargs: Any) -> Any:
+            with simulation_lock:
+                return original_reset(*args, **kwargs)
+
+        sim_env.step = step
+        sim_env.reset = reset
+        barrier_timeout_s = max(3.0, 20.0 * float(getattr(robot, "control_dt", 0.004)))
+        if not wrapped_step_seen.wait(timeout=barrier_timeout_s):
+            sim_env.step = original_step
+            sim_env.reset = original_reset
+            raise RuntimeError(
+                "Unitree G1 simulation state thread did not reach the step/reset lock "
+                f"within {barrier_timeout_s:.1f}s"
+            )
+
+    @staticmethod
+    def _connect_with_simulation_image_option(robot: Any, *, publish_images: bool) -> None:
+        """Forward EnvHub's image-publishing option through pinned LeRobot v0.6.1.
+
+        LeRobot's string-based Hub environment API calls a remote module's
+        ``make_env`` without forwarding arbitrary keyword arguments. The pinned G1
+        EnvHub module accepts ``publish_images`` through its keyword arguments and
+        defaults it to true. Temporarily replacing LeRobot's internal Hub-module call
+        lets this adapter request a control-only headless environment without editing
+        the downloaded Hub source.
+
+        The override is serialized and restored before ``connect`` returns. It fails
+        loudly if no Hub call was intercepted or if the remote contract no longer
+        accepts ``publish_images``.
+        """
+
+        try:
+            import lerobot.envs.factory as env_factory
+        except ImportError as exc:  # pragma: no cover - exercised on real setup
+            raise RuntimeError(
+                "simulation_publish_images requires LeRobot's environment factory"
+            ) from exc
+
+        with _SIMULATION_ENV_FACTORY_LOCK:
+            original_call_make_env = env_factory._call_make_env
+            intercepted_calls = 0
+
+            def call_make_env(module: Any, n_envs: int, use_async_envs: bool, cfg: Any) -> Any:
+                nonlocal intercepted_calls
+                if cfg is not None:
+                    return original_call_make_env(module, n_envs, use_async_envs, cfg)
+
+                entry_fn = getattr(module, "make_env", None)
+                if not callable(entry_fn):
+                    return original_call_make_env(module, n_envs, use_async_envs, cfg)
+                parameters = inspect.signature(entry_fn).parameters
+                accepts_publish_images = "publish_images" in parameters or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in parameters.values()
+                )
+                if not accepts_publish_images:
+                    raise RuntimeError(
+                        "Pinned Unitree G1 EnvHub make_env no longer accepts publish_images"
+                    )
+                intercepted_calls += 1
+                return entry_fn(
+                    n_envs=n_envs,
+                    use_async_envs=use_async_envs,
+                    publish_images=publish_images,
+                )
+
+            env_factory._call_make_env = call_make_env
+            try:
+                try:
+                    robot.connect()
+                except BaseException:
+                    UnitreeG1LeRobot._cleanup_failed_simulation_connect(robot)
+                    raise
+            finally:
+                env_factory._call_make_env = original_call_make_env
+
+            if intercepted_calls != 1:
+                UnitreeG1LeRobot._cleanup_failed_simulation_connect(robot)
+                raise RuntimeError(
+                    "Expected exactly one Unitree G1 EnvHub make_env call while applying "
+                    f"simulation_publish_images, intercepted {intercepted_calls}"
+                )
+
+    @staticmethod
+    def _cleanup_failed_simulation_connect(robot: Any) -> None:
+        try:
+            robot.disconnect()
+        finally:
+            UnitreeG1LeRobot._close_simulation_dds_endpoints(robot)
 
     @staticmethod
     def _close_simulation_dds_endpoints(robot: Any) -> None:

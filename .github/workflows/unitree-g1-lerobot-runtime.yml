@@ -168,7 +168,29 @@ jobs:
               env.close()
           print("after EnvHub close", flush=True)
           PY
-      - name: Run full LeRobot G1 simulation lifecycle smoke
+      - name: Run full headless LeRobot G1 simulation lifecycle smoke
+        timeout-minutes: 3
         env:
           UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
         run: python -m unittest discover -s integration_tests -p "test_unitree_g1_lerobot_runtime.py" -v
+      - name: Characterize G1 image-publishing simulation throughput
+        timeout-minutes: 3
+        env:
+          UNITREE_G1_ENV_ROOT: ${{ github.workspace }}/.vendor/unitree-g1-mujoco
+          G1_HEADLESS_THROUGHPUT_RESULT: ${{ runner.temp }}/g1_headless_throughput.json
+        run: |
+          set -o pipefail
+          python -u -m unittest discover \
+            -s integration_tests \
+            -p "test_unitree_g1_headless_throughput.py" \
+            -v 2>&1 | tee "$RUNNER_TEMP/g1_headless_throughput.log"
+      - name: Upload G1 headless throughput evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unitree-g1-headless-throughput-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/g1_headless_throughput.json
+            ${{ runner.temp }}/g1_headless_throughput.log
+          if-no-files-found: warn
+          retention-days: 7

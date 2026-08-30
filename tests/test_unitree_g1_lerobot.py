@@ -90,6 +90,7 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
                 self.assertTrue(observation.state["is_simulation"])
                 self.assertIsNone(observation.state["controller"])
                 self.assertEqual(observation.state["simulation_dds_interface"], "auto")
+                self.assertIsNone(observation.state["simulation_publish_images"])
                 self.assertEqual(len(observation.state["joint_position_rad"]), 29)
                 self.assertEqual(len(observation.state["joint_velocity_rad_s"]), 29)
                 self.assertEqual(len(observation.state["joint_torque_est_nm"]), 29)
@@ -113,6 +114,7 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
                 result = await robot.execute("reset")
                 self.assertTrue(result.ok)
                 self.assertEqual(result.data["simulation_dds_interface"], "auto")
+                self.assertIsNone(result.data["simulation_publish_images"])
                 self.assertEqual(native.reset_count, 1)
                 self.assertEqual(native.actions, [])
             finally:
@@ -127,7 +129,9 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
             self.assertFalse(disabled.supports(Capability.STAND))
             await disabled.connect()
             try:
-                with self.assertRaisesRegex(RuntimeError, "requires a configured locomotion controller"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "requires a configured locomotion controller"
+                ):
                     await disabled.execute("stand")
                 self.assertEqual(disabled_native.actions, [])
             finally:
@@ -217,7 +221,9 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
         )
         self.assertNotIn("g1.walk_velocity", [tool["name"] for tool in router.list_tools()])
 
-    def test_config_factory_registers_simulation_without_importing_lerobot(self) -> None:
+    def test_config_factory_registers_control_only_simulation_without_importing_lerobot(
+        self,
+    ) -> None:
         self.assertIs(DEFAULT_ADAPTER_FACTORIES["lerobot_unitree_g1"], UnitreeG1LeRobot)
         registry = build_registry(
             {
@@ -228,6 +234,7 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
                             "is_simulation": True,
                             "controller": "GrootLocomotionController",
                             "simulation_dds_interface": None,
+                            "simulation_publish_images": False,
                         },
                     }
                 }
@@ -238,13 +245,31 @@ class UnitreeG1LeRobotTests(unittest.TestCase):
         self.assertTrue(robot.is_simulation)
         self.assertEqual(robot.controller, "GrootLocomotionController")
         self.assertIsNone(robot.simulation_dds_interface)
+        self.assertFalse(robot.simulation_publish_images)
         self.assertEqual(robot.capabilities, frozenset({Capability.OBSERVE, Capability.STAND}))
 
-    def test_default_positions_and_dds_interface_validation(self) -> None:
+    def test_explicit_image_option_rejects_custom_factory(self) -> None:
+        async def scenario() -> None:
+            native = FakeNativeG1()
+            robot = UnitreeG1LeRobot(
+                simulation_publish_images=False,
+                robot_factory=self._factory(native),
+            )
+            with self.assertRaisesRegex(RuntimeError, "requires the default LeRobot"):
+                await robot.connect()
+            self.assertEqual(native.connect_count, 0)
+
+        asyncio.run(scenario())
+
+    def test_default_positions_and_simulation_option_validation(self) -> None:
         with self.assertRaisesRegex(ValueError, "exactly 29"):
             UnitreeG1LeRobot(default_positions=[0.0] * 28)
         with self.assertRaisesRegex(ValueError, "non-empty"):
             UnitreeG1LeRobot(simulation_dds_interface="   ")
+        with self.assertRaisesRegex(ValueError, "true, false, or null"):
+            UnitreeG1LeRobot(simulation_publish_images="false")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "only valid for simulated"):
+            UnitreeG1LeRobot(is_simulation=False, simulation_publish_images=False)
 
 
 if __name__ == "__main__":
