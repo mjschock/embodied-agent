@@ -172,7 +172,7 @@ jobs:
           GROOT_TIMESTEP_RESULT: ${{ runner.temp }}/groot_timestep_ab_result.json
         run: |
           set -o pipefail
-          python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_timestep.py" -v \
+          python -u -m unittest discover -s integration_tests -p "test_unitree_g1_groot_timestep.py" -v 2>&1 \
             | tee "$RUNNER_TEMP/groot_timestep_ab.log"
           python - <<'PY'
           import json
@@ -206,6 +206,14 @@ jobs:
               for key, value in outputs.items():
                   handle.write(f"{key}={float(value):.6f}\n")
           PY
+      - name: Upload GR00T physics-timestep debug log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: groot-timestep-debug-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/groot_timestep_ab.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Upload GR00T physics-timestep evidence
         uses: actions/upload-artifact@v4
         with:
